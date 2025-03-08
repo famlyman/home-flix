@@ -1,4 +1,7 @@
-{
+const { config } = require('dotenv');
+config();
+
+module.exports = {
   "expo": {
     "name": "home-flix",
     "slug": "home-flix",
@@ -41,10 +44,19 @@
       "router": {
         "origin": false
       },
+      CLIENT_ID: process.env.CLIENT_ID,
+      CLIENT_SECRET: process.env.CLIENT,
+      REDIRECT_URI: process.env.REDIRECT_URI,
+      
+      TMDB_API: process.env.TMDB_API,
+      
       "eas": {
         "projectId": "64f99d28-34cf-45ce-ade0-af9ec24a338d"
       }
     },
     "owner": "famlyman"
+  
+    // other expo config
+    
   }
-}
+};
