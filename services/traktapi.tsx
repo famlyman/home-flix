@@ -1,10 +1,11 @@
 import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
+import Constants from "expo-constants";
 
 const TRAKT_API_URL = "https://api.trakt.tv";
-const CLIENT_ID = process.env.TRAKT_CLIENT_ID;
-const CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
+const CLIENT_ID = Constants.expoConfig?.extra?.CLIENT_ID || '';
+const CLIENT_SECRET = Constants.expoConfig?.extra?.CLIENT_SECRET;
 
 if (!CLIENT_ID) {
   throw new Error("Missing TRAKT_CLIENT_ID environment variable");
@@ -189,7 +190,6 @@ export async function fetchTraktLists() {
 export const getListItems = async (
   username: string,
   listId: number,
-  limit: number = 5
 ) => {
   try {
     const response = await axios.get(
@@ -200,9 +200,6 @@ export const getListItems = async (
           "trakt-api-version": "2",
           "trakt-api-key": "CLIENT_ID",
           Authorization: `Bearer ${await getAccessToken()}`,
-        },
-        params: {
-          limit: limit,
         },
       }
     );

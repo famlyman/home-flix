@@ -24,12 +24,10 @@ const imageBackdrop = (backdropPath: string | null) =>
   backdropPath ? `https://image.tmdb.org/t/p/w780${backdropPath}` : null;
 
 // Get list items with TMDB data
-export async function getListItemsWithImages(username: string, listId: string | number, limit = 20) {
+export async function getListItemsWithImages(username: string, listId: string | number) {
   try {
     // Get items from Trakt list
-    const response = await traktApi.get(`/users/${username}/lists/${listId}/items`, {
-      params: { limit },
-    });
+    const response = await traktApi.get(`/users/${username}/lists/${listId}/items`);
 
     if (!response?.data || !Array.isArray(response.data)) {
       return [];
@@ -126,7 +124,7 @@ export async function fetchItemDetails(id: number, type: 'movie' | 'show') {
 // Get a representative image for a list
 export async function getListCoverImage(username: string, listId: string | number) {
   try {
-    const items = await getListItemsWithImages(username, listId, 1);
+    const items = await getListItemsWithImages(username, listId);
     return items.length > 0 ? items[0].posterUrl : null;
   } catch (error) {
     console.error('Error getting list cover image:', error);

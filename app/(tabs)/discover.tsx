@@ -129,13 +129,13 @@ export const HomeDisplay = () => {
     setSearchResults([]);
   };
 
- /* const handleMoviePress = (id: number) => {
+  const handleMoviePress = (id: number) => {
     router.push(`/${id}`);
   };
   
   const handleShowPress = (id: number) => {
     router.push(`/show/${id}`);
-  };*/
+  };
 
   const getItemTitle = (item: Movie | TVShow): string => {
     return 'title' in item ? item.title : item.name;
@@ -179,11 +179,11 @@ export const HomeDisplay = () => {
         renderItem={({ item: media }) => (
           <View style={styles.mediaContainer}>
             <Card item={media} handleClick={() => {
-             /* if (item.type === 'movie') {
+              if (item.type === 'movie') {
                 handleMoviePress(media.id);
               } else {
                 handleShowPress(media.id);
-              }*/
+              }
             }} />
             <Text style={styles.mediaTitle}>{getItemTitle(media)}</Text>
           </View>
