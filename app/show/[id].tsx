@@ -2,22 +2,23 @@ import React, { useEffect, useState } from 'react';
 import {
   ScrollView,
   View,
-    Text,
+  Text,
   Image,
   StyleSheet,
   Dimensions,
   ActivityIndicator,
   Pressable,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getShowDetails, image500 } from '@/services/tmdbapi';
 import Constants from 'expo-constants';
 import MyLists from '@/components/listModal';
-import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import { MaterialCommunityIcons as Icon } from '@expo/vector-icons'; 
+import { checkItemInLists, removeFromTraktList } from '@/services/traktapi';
 
 const { width, height } = Dimensions.get('window');
 
-// Define the TV series details interface
 interface TvDetails {
   id: number;
   name: string;
@@ -33,42 +34,76 @@ interface TvDetails {
 }
 
 export default function TvDetailsScreen() {
-  // All hooks at the top
   const { id } = useLocalSearchParams();
   const seriesId = typeof id === 'string' ? parseInt(id, 10) : Array.isArray(id) ? parseInt(id[0], 10) : 0;
   const router = useRouter();
   const [series, setSeries] = useState<TvDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isModalVisible, setIsModalVisible] = useState(false); // Moved up here
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isInList, setIsInList] = useState(false); // New state
+  const [listIds, setListIds] = useState<string[]>([]); // Track lists with the show
   const statusBarHeight = Constants.statusBarHeight;
 
   useEffect(() => {
-    if (!seriesId) {
-      setError('Invalid series ID');
-      setLoading(false);
-      return;
-    }
-
-    const fetchTvDetails = async () => {
+    const fetchShowAndListStatus = async () => {
       try {
         setLoading(true);
-        const data = await getShowDetails(seriesId);
-        setSeries(data);
+        const showData = await getShowDetails(seriesId);
+        setSeries(showData);
+
+        const { isInAnyList, listIds } = await checkItemInLists(seriesId, 'show');
+        setIsInList(isInAnyList);
+        setListIds(listIds);
       } catch (err) {
-        console.error('Error fetching TV series details:', err);
-        setError('Failed to load TV series details');
+        console.error('Error fetching show or list status:', err);
+        setError('Failed to load show or list status');
       } finally {
         setLoading(false);
       }
     };
-
-    fetchTvDetails();
+    if (seriesId) fetchShowAndListStatus();
   }, [seriesId]);
 
   const openModal = () => setIsModalVisible(true);
-  const closeModal = () => setIsModalVisible(false);
-  const handleAddToList = () => openModal();
+  const closeModal = () => {
+    setIsModalVisible(false);
+    // Refresh list status after adding
+    checkItemInLists(seriesId, 'show')
+      .then(({ isInAnyList, listIds }) => {
+        setIsInList(isInAnyList);
+        setListIds(listIds);
+      })
+      .catch(err => console.error("Error refreshing list status:", err));
+  };
+
+  const handleHeartPress = async () => {
+    if (isInList) {
+      Alert.alert(
+        "Remove Show",
+        `Are you sure you want to remove "${series?.name}" from all lists?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await Promise.all(listIds.map(listId => removeFromTraktList(listId, seriesId, 'show')));
+                setIsInList(false);
+                setListIds([]);
+              } catch (err) {
+                console.error("Error removing movie:", err);
+                setError('Failed to remove movie');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      openModal();
+    }
+  };
 
   if (loading) {
     return (
@@ -95,7 +130,6 @@ export default function TvDetailsScreen() {
     );
   }
 
-  // Get average episode runtime
   const avgRuntime =
     series.episode_run_time && series.episode_run_time.length > 0
       ? Math.floor(series.episode_run_time.reduce((a, b) => a + b, 0) / series.episode_run_time.length)
@@ -103,7 +137,6 @@ export default function TvDetailsScreen() {
 
   return (
     <ScrollView style={[styles.container, { paddingTop: statusBarHeight }]}>
-      {/* Backdrop Image */}
       {series.backdrop_path && (
         <Image
           source={{ uri: image500(series.backdrop_path) || '' }}
@@ -113,15 +146,14 @@ export default function TvDetailsScreen() {
       )}
       <View style={styles.backIconContainer}>
         <Pressable style={styles.backIcon} onPress={() => router.back()}>
-          <Icon name="arrow-left"size={30} strokeWidth={2} color="white" />
+          <Icon name="arrow-left" size={30} strokeWidth={2} color="white" />
         </Pressable>
-        <Pressable onPress={handleAddToList}>
-          <Icon name="cards-heart" size={30} strokeWidth={2} color="white" />
+        <Pressable onPress={handleHeartPress}>
+          <Icon name="cards-heart" size={30} strokeWidth={2} color={isInList ? 'red' : 'white'} />
         </Pressable>
       </View>
 
       <View style={styles.contentContainer}>
-        {/* Series Poster and Basic Info */}
         <View style={styles.headerContainer}>
           {series.poster_path && (
             <Image
@@ -157,8 +189,6 @@ export default function TvDetailsScreen() {
             )}
           </View>
         </View>
-
-        {/* Overview */}
         <View style={styles.overviewContainer}>
           <Text style={styles.overviewTitle}>Overview</Text>
           <Text style={styles.overview}>{series.overview}</Text>
@@ -169,102 +199,37 @@ export default function TvDetailsScreen() {
   );
 }
 
+// Styles remain unchanged
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  backdropImage: {
-    width: width,
-    height: height * 0.3,
-  },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 10, fontSize: 16 },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  errorText: { fontSize: 16, textAlign: 'center' },
+  backdropImage: { width: width, height: height * 0.3 },
   backIconContainer: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     zIndex: 2,
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 16,
   },
-  backIcon: {
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    borderRadius: 50,
-    padding: 5,
-    margin: 5,
-  },
-  contentContainer: {
-    padding: 16,
-  },
-  headerContainer: {
-    flexDirection: 'row',
-    marginBottom: 20,
-  },
-  posterImage: {
-    width: width * 0.3,
-    height: height * 0.2,
-    borderRadius: 10,
-  },
-  infoContainer: {
-    flex: 1,
-    marginLeft: 16,
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  releaseDate: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  rating: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  runtime: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  seasons: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  genres: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  overviewContainer: {
-    marginTop: 16,
-  },
-  overviewTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  overview: {
-    fontSize: 14,
-    lineHeight: 22,
-  },
+  backIcon: { backgroundColor: 'rgba(0, 0, 0, 0.5)', borderRadius: 50, padding: 5, margin: 5 },
+  contentContainer: { padding: 16 },
+  headerContainer: { flexDirection: 'row', marginBottom: 20 },
+  posterImage: { width: width * 0.3, height: height * 0.2, borderRadius: 10 },
+  infoContainer: { flex: 1, marginLeft: 16, justifyContent: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
+  releaseDate: { fontSize: 14, marginBottom: 4 },
+  rating: { fontSize: 14, marginBottom: 4 },
+  runtime: { fontSize: 14, marginBottom: 4 },
+  seasons: { fontSize: 14, marginBottom: 4 },
+  genres: { fontSize: 14, marginBottom: 4 },
+  overviewContainer: { marginTop: 16 },
+  overviewTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  overview: { fontSize: 14, lineHeight: 22 },
 });

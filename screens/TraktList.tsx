@@ -1,20 +1,23 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
-  Text,
-  FlatList,
   StyleSheet,
-  ActivityIndicator,
   Image,
   TouchableOpacity,
-  Alert,
 } from "react-native";
-import { Card, Title, Provider as PaperProvider, MD3DarkTheme } from "react-native-paper";
+import { 
+  Card, 
+  Title, 
+  Text, 
+  ActivityIndicator, 
+  useTheme
+} from "react-native-paper";
 import { fetchTraktLists, getAccessToken } from "../services/traktapi";
 import { getListItemsWithImages } from "../services/tmdb-trakt";
 import * as SecureStore from "expo-secure-store";
 import { useRouter } from "expo-router";
-import { Colors } from "react-native/Libraries/NewAppScreen";
+import { FlashList } from "@shopify/flash-list";
+
 
 interface TraktList {
   name: string;
@@ -35,14 +38,6 @@ interface TraktListsProps {
   isAuthenticated: boolean;
 }
 
-const theme = {
-  ...MD3DarkTheme,
-  colors: {
-    ...MD3DarkTheme.colors,
-    ...Colors.dark,
-  },
-};
-
 const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
   const [lists, setLists] = useState<(TraktList & { items?: ItemDetails[] })[]>(
     []
@@ -51,6 +46,7 @@ const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const router = useRouter();
+  const theme = useTheme();
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -83,7 +79,7 @@ const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
           const items = await getListItemsWithImages(
             storedUsername,
             list.ids.trakt,
-          ); // Limit to 5 items
+          );
           return { ...list, items };
         })
       );
@@ -101,7 +97,6 @@ const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
   }, [fetchData]);
 
   const handleListPress = (list: TraktList) => {
-    // Example: Show list details or navigate to list details screen
     router.push({
       pathname: "/lists/list/listdetails",
       params: {
@@ -128,24 +123,36 @@ const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
     item: TraktList & { items?: ItemDetails[] };
   }) => (
     <TouchableOpacity onPress={() => handleListPress(item)}>
-      <Card style={styles.card}>
+      <Card style={[styles.card, { backgroundColor: theme.colors.elevation.level2 }]}>
         <Card.Content>
-          <Title>{item.name}</Title>
+          <Title style={{ color: theme.colors.onSurface }}>{item.name}</Title>
           {item.items && (
-            <FlatList
+            <FlashList
+              estimatedItemSize={200}
               data={item.items}
               horizontal
               keyExtractor={(subItem, index) => `${subItem.id}-${subItem.type}-${index}`}
               renderItem={({ item: subItem }) => (
-                <View style={styles.itemContainer}>
+                <TouchableOpacity 
+                  style={styles.itemContainer} 
+                  onPress={() => handleItemPress(subItem)}
+                >
                   {subItem.posterUrl && (
                     <Image
                       source={{ uri: subItem.posterUrl }}
                       style={styles.itemImage}
                     />
                   )}
-                  <Text style={styles.itemTitle}>{subItem.title}</Text>
-                </View>
+                  <Text 
+                    style={[
+                      styles.itemTitle, 
+                      { color: theme.colors.onSurface }
+                    ]}
+                    variant="labelSmall"
+                  >
+                    {subItem.title}
+                  </Text>
+                </TouchableOpacity>
               )}
             />
           )}
@@ -155,33 +162,55 @@ const TraktLists = ({ isAuthenticated }: TraktListsProps) => {
   );
 
   if (loading) {
-    return <ActivityIndicator size="large" color="#0000ff" />;
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator animating={true} color={theme.colors.primary} size="large" />
+      </View>
+    );
   }
 
   if (error) {
-    return <Text style={styles.errorText}>Error: {error}</Text>;
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.background }]}>
+        <Text style={[styles.errorText, { color: theme.colors.error }]} variant="bodyLarge">
+          Error: {error}
+        </Text>
+      </View>
+    );
   }
 
   if (lists.length === 0) {
-    return <Text>No lists found.</Text>;
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.background }]}>
+        <Text style={{ color: theme.colors.onSurface }} variant="bodyLarge">
+          No lists found.
+        </Text>
+      </View>
+    );
   }
 
   return (
-    <PaperProvider theme={theme}>
-      <FlatList
-        data={lists}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.ids.slug}
-        contentContainerStyle={styles.listContent}
-      />
-    </PaperProvider>
+    <FlashList
+      estimatedItemSize={200}
+      data={lists}
+      renderItem={({ item }) => renderItem({ item })}
+      keyExtractor={(item) => item.ids.slug}
+      contentContainerStyle={{
+        paddingVertical: 10,
+        backgroundColor: theme.colors.background,
+      }}
+    />
   );
 };
 
 const styles = StyleSheet.create({
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   listContent: {
     paddingVertical: 10,
-    backgroundColor: Colors.dark.background,
   },
   card: {
     marginVertical: 5,
@@ -200,13 +229,11 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   itemTitle: {
-    fontSize: 12,
     textAlign: "center",
     marginTop: 4,
-    color: "white",
+    maxWidth: 60,
   },
   errorText: {
-    color: "red",
     fontSize: 16,
     textAlign: "center",
   },

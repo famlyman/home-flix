@@ -255,39 +255,43 @@ export async function addToTraktList(
   }
 }
 
-export async function removeFromTraktList(
-  listId: string,
-  itemId: number,
-  type: "movie" | "show"
-) {
+// Check if an item is in any list
+export async function checkItemInLists(itemId: number, type: 'movie' | 'show') {
   try {
-    const payload: { movies?: any[]; shows?: any[] } = {};
-
-    if (type === "movie") {
-      payload.movies = [
-        {
-          ids: {
-            tmdb: itemId, // TMDB ID for the movie
-          },
-        },
-      ];
-    } else if (type === "show") {
-      payload.shows = [
-        {
-          ids: {
-            tmdb: itemId, // TMDB ID for the show
-          },
-        },
-      ];
-    }
-
-    const response = await traktApi.post(
-      `/users/me/lists/${listId}/items/remove`,
-      payload
+    const lists = await fetchTraktLists(); // Your existing function
+    const listChecks = await Promise.all(
+      lists.map(async (list: { ids: { trakt: any; }; }) => {
+        const itemsResponse = await traktApi.get(`/users/me/lists/${list.ids.trakt}/items`);
+        const items = itemsResponse.data;
+        const isInList = items.some((item: {
+          type: string;
+          movie?: { ids: { tmdb: number; }; };
+          show?: { ids: { tmdb: number; }; };
+        }) => {
+          const itemIds = item.movie?.ids || item.show?.ids;
+          return itemIds && item.type === type && itemIds.tmdb === itemId;
+        });
+        return { listId: list.ids.trakt, isInList };
+      })
     );
+    const listsWithItem = listChecks.filter(check => check.isInList).map(check => check.listId);
+    return { isInAnyList: listsWithItem.length > 0, listIds: listsWithItem };
+  } catch (error) {
+    console.error("Error checking item in lists:", error);
+    throw new Error('Failed to check item in lists');
+  }
+}
 
+// Remove item from a list
+export async function removeFromTraktList(listId: string, itemId: number, type: 'movie' | 'show') {
+  try {
+    const payload = type === 'movie' 
+      ? { movies: [{ ids: { tmdb: itemId } }] }
+      : { shows: [{ ids: { tmdb: itemId } }] };
+    const response = await traktApi.post(`/users/me/lists/${listId}/items/remove`, payload);
     return response.data;
   } catch (error) {
-    throw new Error("Failed to remove item to Trakt list");
+    console.error("Error removing item from Trakt list:", error);
+    throw new Error('Failed to remove item from Trakt list');
   }
 }

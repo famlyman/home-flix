@@ -2,15 +2,19 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
-  FlatList,
   Image,
   StyleSheet,
   ActivityIndicator,
   Pressable,
+  Alert, // Add this
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getListItemsWithImages } from "../../../services/tmdb-trakt";
+import { addToTraktList, removeFromTraktList } from "../../../services/traktapi";
 import * as SecureStore from "expo-secure-store";
+import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
+
 
 interface ListItem {
   id: number;
@@ -20,9 +24,14 @@ interface ListItem {
   overview?: string;
 }
 
-const ListItemComponent = React.memo(({ item, onPress }: { item: ListItem, onPress: () => void }) => (
-  <Pressable onPress={onPress}>
-    <View style={styles.itemContainer}>
+const ListItemComponent = React.memo(({ item, onPress, onHeartPress, isInList }: { 
+  item: ListItem, 
+  onPress: () => void, 
+  onHeartPress: () => void, 
+  isInList: boolean 
+}) => (
+  <View style={styles.itemContainer}>
+    <Pressable onPress={onPress} style={styles.itemContent}>
       {item.posterUrl && (
         <Image source={{ uri: item.posterUrl }} style={styles.posterImage} />
       )}
@@ -35,8 +44,11 @@ const ListItemComponent = React.memo(({ item, onPress }: { item: ListItem, onPre
           </Text>
         )}
       </View>
-    </View>
-  </Pressable>
+    </Pressable>
+    <Pressable onPress={onHeartPress}>
+      <Icon name="cards-heart" size={24} strokeWidth={2} color={isInList ? 'red' : '#A0A0A0'} />
+    </Pressable>
+  </View>
 ));
 
 export default function ListDetailsScreen() {
@@ -51,7 +63,9 @@ export default function ListDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0); // Start at page 0 for proper calculation
+  const [page, setPage] = useState(0);
+  const [itemStatus, setItemStatus] = useState<{ [key: number]: boolean }>({});
+
   const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
@@ -59,23 +73,21 @@ export default function ListDetailsScreen() {
       try {
         setLoading(true);
         const username = await SecureStore.getItemAsync('trakt_username');
-        if (!username) {
-          throw new Error('No username found');
-        }
-  
-        // Convert listId to number
+        if (!username) throw new Error('No username found');
+
         const numericListId = parseInt(listId || '0', 10);
-  
-        // Fetch all items from the list
         const listItems = await getListItemsWithImages(username, numericListId);
         setAllItems(listItems);
-        
-        // Set initial displayed items
+
+        const initialStatus = listItems.reduce((acc, item) => {
+          acc[item.id] = true;
+          return acc;
+        }, {} as { [key: number]: boolean });
+        setItemStatus(initialStatus);
+
         const initialItems = listItems.slice(0, ITEMS_PER_PAGE);
         setDisplayedItems(initialItems);
-        setPage(1); // Set to page 1 after initial load
-        
-        
+        setPage(1);
       } catch (err: any) {
         console.error('Error fetching list items:', err);
         setError(err.message || 'Failed to fetch list items');
@@ -83,49 +95,79 @@ export default function ListDetailsScreen() {
         setLoading(false);
       }
     };
-  
-    if (listId) {
-      fetchListItems();
-    }
+
+    if (listId) fetchListItems();
   }, [listId]);
 
   const loadMoreItems = () => {
     if (loadingMore || displayedItems.length >= allItems.length) return;
-    
-    
+
     setLoadingMore(true);
-    
-    // Calculate the next batch of items
     const startIndex = displayedItems.length;
     const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, allItems.length);
-    
+
     if (startIndex < allItems.length) {
       const newItems = allItems.slice(startIndex, endIndex);
-      
       setDisplayedItems(prevItems => [...prevItems, ...newItems]);
       setPage(prevPage => prevPage + 1);
-      
-      setTimeout(() => {
-        setLoadingMore(false);
-      }, 100);
+      setTimeout(() => setLoadingMore(false), 100);
     } else {
       setLoadingMore(false);
     }
   };
 
-  // Move this inside your component body, not inside any function
-const hasMoreItems = allItems.length > displayedItems.length;
+  const handleHeartPress = (item: ListItem) => {
+    const isInList = itemStatus[item.id];
+    if (isInList) {
+      Alert.alert(
+        "Remove Item",
+        `Are you sure you want to remove "${item.title}" from "${listName}"?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await removeFromTraktList(listId, item.id, item.type);
+                setItemStatus(prev => ({ ...prev, [item.id]: false }));
+                setDisplayedItems(prev => prev.filter(i => i.id !== item.id));
+                setAllItems(prev => prev.filter(i => i.id !== item.id));
+              } catch (err) {
+                console.error("Error removing item:", err);
+                setError("Failed to remove item");
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      // No confirmation needed for adding
+      addToTraktList(listId, item.id, item.type)
+        .then(() => {
+            setItemStatus(prev => ({ ...prev, [item.id]: true }));
+            setDisplayedItems(prev => [...prev, item]);
+            setAllItems(prev => [...prev, item]);
+          })
+        .catch(err => {
+          console.error("Error adding item:", err);
+          setError("Failed to add item");
+        });
+    }
+  };
+
+  const hasMoreItems = allItems.length > displayedItems.length;
 
   const renderItem = ({ item }: { item: ListItem }) => (
     <ListItemComponent
       item={item}
       onPress={() =>
         router.push(
-          `/lists/items/itemdetails?id=${item.id}&type=${
-            item.type
-          }&title=${encodeURIComponent(item.title)}`
+          `/lists/items/itemdetails?id=${item.id}&type=${item.type}&title=${encodeURIComponent(item.title)}&listId=${listId}`
         )
       }
+      onHeartPress={() => handleHeartPress(item)}
+      isInList={itemStatus[item.id] ?? false}
     />
   );
 
@@ -165,18 +207,16 @@ const hasMoreItems = allItems.length > displayedItems.length;
       <Text style={styles.itemCount}>
         Showing {displayedItems.length} of {allItems.length} items
       </Text>
-      <FlatList
+      <FlashList
+        estimatedItemSize={200}
         data={displayedItems}
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}-${item.type}`}
         contentContainerStyle={styles.listContent}
         ListFooterComponent={renderFooter}
-        onEndReachedThreshold={0.5}  // Increased threshold
+        onEndReachedThreshold={0.5}
         onEndReached={() => {
-          
-          if (hasMoreItems) {
-            loadMoreItems();
-          }
+          if (hasMoreItems) loadMoreItems();
         }}
       />
     </View>
@@ -186,7 +226,7 @@ const hasMoreItems = allItems.length > displayedItems.length;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#121212", // Dark background
+    backgroundColor: "#121212",
   },
   loadingContainer: {
     flex: 1,
@@ -199,7 +239,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     padding: 15,
     textAlign: "center",
-    color: "#FFFFFF", // Light text color
+    color: "#FFFFFF",
   },
   itemCount: {
     fontSize: 14,
@@ -213,8 +253,10 @@ const styles = StyleSheet.create({
   },
   itemContainer: {
     flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 15,
-    backgroundColor: "#1E1E1E", // Darker item background
+    backgroundColor: "#1E1E1E",
     borderRadius: 10,
     padding: 10,
     shadowColor: "#000",
@@ -222,6 +264,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  itemContent: {
+    flexDirection: "row",
+    flex: 1,
   },
   posterImage: {
     width: 80,
@@ -237,16 +283,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     marginBottom: 5,
-    color: "#FFFFFF", // Light text color
+    color: "#FFFFFF",
   },
   itemType: {
     fontSize: 14,
-    color: "#A0A0A0", // Medium light text color
+    color: "#A0A0A0",
     marginBottom: 5,
   },
   itemOverview: {
     fontSize: 12,
-    color: "#D3D3D3", // Light text color
+    color: "#D3D3D3",
   },
   errorText: {
     color: "red",

@@ -1,17 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { 
   ScrollView, 
-  Text,
   View, 
   Image, 
   StyleSheet, 
-  Dimensions, 
-  ActivityIndicator 
+  Dimensions 
 } from 'react-native';
+import { 
+  Text, 
+  ActivityIndicator,
+  useTheme,
+  Surface,
+  Divider
+} from 'react-native-paper';
 import { useLocalSearchParams } from 'expo-router';
-import { getTvDetails, image500 } from '@/services/tmdbapi';
+import { getShowDetails, image500 } from '@/services/tmdbapi';
 import Constants from 'expo-constants';
-
 
 const { width, height } = Dimensions.get('window');
 
@@ -33,11 +37,12 @@ interface TvDetails {
 export default function TvDetailsScreen() {
   // Get the id from the route params
   const { id } = useLocalSearchParams();
-  const seriesId = typeof id === 'string' ? parseInt(id, 10) : Array.isArray(id) ? parseInt(id[0], 10) : 0;  
+  const seriesId = typeof id === 'string' ? parseInt(id, 10) : Array.isArray(id) ? parseInt(id[0], 10) : 0;
   const [series, setSeries] = useState<TvDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const statusBarHeight = Constants.statusBarHeight;
+  const theme = useTheme();
 
   useEffect(() => {
     if (!seriesId) {
@@ -49,7 +54,7 @@ export default function TvDetailsScreen() {
     const fetchTvDetails = async () => {
       try {
         setLoading(true);
-        const data = await getTvDetails(seriesId);
+        const data = await getShowDetails(seriesId);
         setSeries(data);
       } catch (err) {
         console.error('Error fetching TV series details:', err);
@@ -64,25 +69,42 @@ export default function TvDetailsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#0000ff" />
-        <Text style={styles.loadingText}>Loading series details...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator animating size="large" color={theme.colors.primary} />
+        <Text 
+          style={{ marginTop: 10, color: theme.colors.onBackground }} 
+          variant="bodyLarge"
+        >
+          Loading series details...
+        </Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>{error}</Text>
+      <View style={[styles.errorContainer, { backgroundColor: theme.colors.background }]}>
+        <Text 
+          style={{ textAlign: 'center' }}
+          variant="bodyLarge"
+        >
+          <Text style={{ color: theme.colors.error, textAlign: 'center' }}>
+            {error}
+          </Text>
+        </Text>
       </View>
     );
   }
 
   if (!series) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>No series details found</Text>
+      <View style={[styles.errorContainer, { backgroundColor: theme.colors.background }]}>
+        <Text 
+          style={{ textAlign: 'center', color: theme.colors.onBackground }}
+          variant="bodyLarge"
+        >
+          No series details found
+        </Text>
       </View>
     );
   }
@@ -93,7 +115,15 @@ export default function TvDetailsScreen() {
     : 0;
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: statusBarHeight }]}>
+    <ScrollView 
+      style={[
+        styles.container, 
+        { 
+          paddingTop: statusBarHeight,
+          backgroundColor: theme.colors.background 
+        }
+      ]}
+    >
       {/* Backdrop Image */}
       {series.backdrop_path && (
         <Image
@@ -103,7 +133,7 @@ export default function TvDetailsScreen() {
         />
       )}
       
-      <View style={styles.contentContainer}>
+      <Surface style={[styles.contentContainer, { backgroundColor: theme.colors.elevation.level1 }]}>
         {/* Series Poster and Basic Info */}
         <View style={styles.headerContainer}>
           {series.poster_path && (
@@ -115,44 +145,76 @@ export default function TvDetailsScreen() {
           )}
           
           <View style={styles.infoContainer}>
-            <Text style={styles.title}>{series.name}</Text>
+            <Text 
+              variant="headlineSmall" 
+              style={{ marginBottom: 8, fontWeight: 'bold', color: theme.colors.onSurface }}
+            >
+              {series.name}
+            </Text>
             
             {series.first_air_date && (
-              <Text style={styles.releaseDate}>
+              <Text 
+                variant="bodyMedium"
+                style={{ marginBottom: 4, color: theme.colors.onSurfaceVariant }}
+              >
                 First Aired: {new Date(series.first_air_date).toLocaleDateString()}
               </Text>
             )}
             
             {series.vote_average > 0 && (
-              <Text style={styles.rating}>
+              <Text 
+                variant="bodyMedium"
+                style={{ marginBottom: 4, color: theme.colors.onSurfaceVariant }}
+              >
                 Rating: {series.vote_average.toFixed(1)}/10
               </Text>
             )}
             
             {avgRuntime > 0 && (
-              <Text style={styles.runtime}>
+              <Text 
+                variant="bodyMedium"
+                style={{ marginBottom: 4, color: theme.colors.onSurfaceVariant }}
+              >
                 Avg. Episode: {avgRuntime} min
               </Text>
             )}
             
-            <Text style={styles.seasons}>
+            <Text 
+              variant="bodyMedium"
+              style={{ marginBottom: 4, color: theme.colors.onSurfaceVariant }}
+            >
               Seasons: {series.number_of_seasons} | Episodes: {series.number_of_episodes}
             </Text>
             
             {series.genres && series.genres.length > 0 && (
-              <Text style={styles.genres}>
+              <Text 
+                variant="bodyMedium"
+                style={{ marginBottom: 4, color: theme.colors.onSurfaceVariant }}
+              >
                 Genres: {series.genres.map(g => g.name).join(', ')}
               </Text>
             )}
           </View>
         </View>
         
+        <Divider style={{ marginVertical: 8 }} />
+        
         {/* Overview */}
         <View style={styles.overviewContainer}>
-          <Text style={styles.overviewTitle}>Overview</Text>
-          <Text style={styles.overview}>{series.overview}</Text>
+          <Text 
+            variant="titleLarge" 
+            style={{ marginBottom: 8, fontWeight: 'bold', color: theme.colors.onSurface }}
+          >
+            Overview
+          </Text>
+          <Text 
+            variant="bodyLarge"
+            style={{ lineHeight: 22, color: theme.colors.onSurface }}
+          >
+            {series.overview}
+          </Text>
         </View>
-      </View>
+      </Surface>
     </ScrollView>
   );
 }
@@ -166,19 +228,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    textAlign: 'center',
   },
   backdropImage: {
     width: width,
@@ -186,10 +240,13 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    marginTop: -20,
   },
   headerContainer: {
     flexDirection: 'row',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   posterImage: {
     width: width * 0.3,
@@ -201,41 +258,7 @@ const styles = StyleSheet.create({
     marginLeft: 16,
     justifyContent: 'center',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  releaseDate: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  rating: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  runtime: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  seasons: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  genres: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
   overviewContainer: {
-    marginTop: 16,
-  },
-  overviewTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  overview: {
-    fontSize: 14,
-    lineHeight: 22,
-  },
+    marginTop: 8,
+  }
 });

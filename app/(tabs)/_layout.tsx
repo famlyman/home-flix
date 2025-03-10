@@ -29,7 +29,15 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Add more tab screens as needed */}
+      <Tabs.Screen
+        name="video"
+        options={{
+          title: 'Video',
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => (
+            <Icon name="video" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
