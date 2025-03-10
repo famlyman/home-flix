@@ -295,3 +295,22 @@ export async function removeFromTraktList(listId: string, itemId: number, type: 
     throw new Error('Failed to remove item from Trakt list');
   }
 }
+
+async function scrobble(action: "start" | "pause" | "stop", type: "movie" | "show", id: number, progress: number, episode?: { season: number; episode: number }) {
+  const payload = type === "movie" 
+    ? { movie: { ids: { trakt: id } }, progress }
+    : { show: { ids: { trakt: id } }, episode: { season: episode!.season, number: episode!.episode }, progress };
+
+  try {
+    const response = await axios.post(
+      `${TRAKT_API_URL}/scrobble/${action}`,
+      payload,
+      { headers: { "trakt-api-key": CLIENT_ID, "Content-Type": "application/json" } }
+    );
+    console.log(`Scrobble ${action} success:`, response.data);
+  } catch (err: any) {
+    console.error(`Scrobble ${action} error:`, err.message);
+  }
+}
+
+export { scrobble };

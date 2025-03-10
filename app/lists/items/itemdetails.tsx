@@ -9,15 +9,17 @@ import {
   Alert,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { fetchItemDetails } from "../../../services/tmdb-trakt";
 import Constants from "expo-constants";
-import { checkItemInLists, addToTraktList, removeFromTraktList } from "../../../services/traktapi";
+import { checkItemInLists, addToTraktList, removeFromTraktList, scrobble } from "../../../services/traktapi";
 import { MaterialCommunityIcons as Icon } from "@expo/vector-icons";
 import MyLists from "../../../components/listModal";
 import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
 import { FlashList } from "@shopify/flash-list";
+import { VideoView, useVideoPlayer } from "expo-video";
+import { useEvent } from "expo"; // Added useEvent import
+import { getPremiumizeMediaUrl } from "../../../services/premiumize";
 
 const TMDB_API_KEY = Constants.expoConfig?.extra?.TMDB_API;
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
@@ -57,8 +59,51 @@ export default function ItemDetailsScreen() {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
   const statusBarHeight = Constants.statusBarHeight;
   const numericId = parseInt(id, 10);
+
+  // Create the player instance
+const player = useVideoPlayer(mediaUrl || "");
+
+// Track playing state
+const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
+
+// Track status changes
+const playerStatus = useEvent(player, "statusChange", { status: player.status });
+
+// Update progress based on current time and duration from player directly
+useEffect(() => {
+  if (player.duration > 0) {
+    const progressPercent = (player.currentTime / player.duration) * 100;
+    setProgress(progressPercent);
+  }
+}, [player.currentTime, player.duration]);
+
+// Handle playback end using player status
+React.useEffect(() => {
+  // Check if video has finished (currentTime close to duration)
+  if (player.duration > 0 && player.currentTime > 0 && 
+      player.currentTime >= player.duration - 0.5) { // Within 0.5 seconds of the end
+    scrobble("stop", type, numericId, progress, selectedEpisode ? 
+      { season: selectedSeason!, episode: selectedEpisode.episode_number } : undefined);
+  }
+}, [player.currentTime, player.duration, type, numericId, progress, selectedSeason, selectedEpisode]);
+
+// Scrobble on play/pause state changes
+useEffect(() => {
+  if (isPlaying) {
+    console.log("Video started playing");
+    scrobble("start", type, numericId, progress, selectedEpisode ? 
+      { season: selectedSeason!, episode: selectedEpisode.episode_number } : undefined);
+  } else if (player.duration > 0) { // Only scrobble pause if video has loaded
+    console.log("Video paused");
+    scrobble("pause", type, numericId, progress, selectedEpisode ? 
+      { season: selectedSeason!, episode: selectedEpisode.episode_number } : undefined);
+  }
+}, [isPlaying, type, numericId, progress, selectedSeason, selectedEpisode, player.duration]);
+
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -80,7 +125,7 @@ export default function ItemDetailsScreen() {
           setSelectedSeason(response.data.seasons[0]?.season_number || 1);
         }
       } catch (err: any) {
-        console.error("Fetch Error:", err.response?.status, err.message);
+        console.error("Fetch Error:", err.message);
         setError(err.message || "Failed to fetch item details");
       } finally {
         setLoading(false);
@@ -154,11 +199,27 @@ export default function ItemDetailsScreen() {
     console.log(`Selected ${episode.name}`);
   };
 
-  const handlePlayPress = () => {
-    if (type === "movie" && itemDetails) {
-      console.log(`Playing ${itemDetails.title}`);
-    } else if (type === "show" && selectedEpisode) {
-      console.log(`Playing ${selectedEpisode.name}`);
+  const handlePlayPress = async () => {
+    try {
+      let url: string;
+      if (type === "movie" && itemDetails) {
+        url = await getPremiumizeMediaUrl(numericId, "movie");
+        setMediaUrl(url);
+        player.replace(url); // Replace source instead of setting initially
+        player.play();
+        console.log(`Playing ${itemDetails.title}`);
+      } else if (type === "show" && selectedEpisode) {
+        url = await getPremiumizeMediaUrl(numericId, "show", {
+          season: selectedSeason!,
+          episode: selectedEpisode.episode_number,
+        });
+        setMediaUrl(url);
+        player.replace(url); // Replace source instead of setting initially
+        player.play();
+        console.log(`Playing ${selectedEpisode.name}`);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to fetch media URL");
     }
   };
 
@@ -183,23 +244,33 @@ export default function ItemDetailsScreen() {
                 />
               </Pressable>
             )}
-            {type === "movie" && itemDetails && (
+            {(type === "movie" || (type === "show" && selectedEpisode)) && (
               <Pressable style={styles.playButton} onPress={handlePlayPress}>
                 <Icon name="play" size={24} color="#FFFFFF" />
                 <Text style={styles.playButtonText}>Play</Text>
               </Pressable>
             )}
           </View>
-          {type === "movie" && itemDetails && (
+          {(type === "movie" || (type === "show" && selectedEpisode)) && (
             <View style={styles.progressContainer}>
               <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: "0%" }]} />
+                <View style={[styles.progressFill, { width: `${progress}%` }]} />
               </View>
-              <Text style={styles.progressText}>0% Watched</Text>
+              <Text style={styles.progressText}>{progress.toFixed(0)}% Watched</Text>
             </View>
           )}
         </View>
       </View>
+
+      {mediaUrl && (
+        <VideoView
+          style={styles.video}
+          player={player}
+          allowsFullscreen
+          allowsPictureInPicture
+          nativeControls
+        />
+      )}
 
       {itemDetails?.overview && (
         <View style={styles.sectionContainer}>
@@ -261,7 +332,6 @@ export default function ItemDetailsScreen() {
             )}
             keyExtractor={(item) => `${item.episode_number}`}
             estimatedItemSize={50}
-            style={styles.episodeList}
             scrollEnabled={false}
           />
           {selectedEpisode && (
@@ -275,16 +345,6 @@ export default function ItemDetailsScreen() {
               {selectedEpisode.overview && (
                 <Text style={styles.episodeOverview}>{selectedEpisode.overview}</Text>
               )}
-              <View style={styles.progressContainer}>
-                <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: "0%" }]} />
-                </View>
-                <Text style={styles.progressText}>0% Watched</Text>
-              </View>
-              <Pressable style={styles.playButton} onPress={handlePlayPress}>
-                <Icon name="play" size={24} color="#FFFFFF" />
-                <Text style={styles.playButtonText}>Play</Text>
-              </Pressable>
             </View>
           )}
         </View>
@@ -312,7 +372,6 @@ export default function ItemDetailsScreen() {
         renderItem={() => null}
         keyExtractor={() => "header"}
         estimatedItemSize={200}
-        contentContainerStyle={styles.listContent}
       />
       {listId && (
         <MyLists visible={isModalVisible} onClose={closeModal} itemId={numericId} type={type} />
@@ -359,7 +418,7 @@ const styles = StyleSheet.create({
   buttonContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10, // Space between heart and play buttons
+    gap: 10,
   },
   iconButton: {
     padding: 5,
@@ -377,6 +436,11 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "bold",
     marginLeft: 5,
+  },
+  video: {
+    width: "100%",
+    height: 200,
+    backgroundColor: "#000",
   },
   sectionContainer: {
     marginHorizontal: 15,

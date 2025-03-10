@@ -135,6 +135,7 @@ export const HomeDisplay = () => {
   
   const handleShowPress = (id: number) => {
     router.push(`/show/${id}`);
+    console.log(id);
   };
 
   const getItemTitle = (item: Movie | TVShow): string => {
@@ -198,11 +199,11 @@ export const HomeDisplay = () => {
   const renderSearchResult = ({ item }: { item: Movie | TVShow }) => (
     <View style={styles.searchResultItem}>
       <Card item={item} handleClick={() => {
-        /*if (searchType === 'movie') {
+        if (searchType === 'movie') {
           handleMoviePress(item.id);
         } else {
           handleShowPress(item.id);
-        }*/
+        }
       }} />
       <Text style={styles.mediaTitle}>{getItemTitle(item)}</Text>
     </View>
