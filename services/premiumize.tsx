@@ -1,19 +1,17 @@
 import axios from "axios";
 import Constants from "expo-constants";
-import * as SecureStore from 'expo-secure-store';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
+import * as SecureStore from "expo-secure-store";
+import * as Linking from "expo-linking";
+import qs from "qs";
 
 const PREMIUMIZE_API_BASE = "https://www.premiumize.me/api";
-const PREMIUMIZE_CLIENT_ID = Constants.expoConfig?.extra?.PREM_CLIENT_ID || '';
-const PREMIUMIZE_CLIENT_SECRET = Constants.expoConfig?.extra?.PREM_CLIENT_SECRET || '';
-const REDIRECT_URI = Constants.expoConfig?.extra?.PREM_REDIRECT_URI || 'yourapp://auth/callback';
+const PREMIUMIZE_TOKEN_URL = "https://www.premiumize.me/token";
+const PREMIUMIZE_CLIENT_ID = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_ID || "";
+const PREMIUMIZE_CLIENT_SECRET = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_SECRET || "";
 
-// Keys for storing tokens
-const ACCESS_TOKEN_KEY = 'premiumize_access_token';
-const REFRESH_TOKEN_KEY = 'premiumize_refresh_token';
+const ACCESS_TOKEN_KEY = "premiumize_access_token";
+const REFRESH_TOKEN_KEY = "premiumize_refresh_token";
 
-// Get stored tokens
 export async function getStoredAccessToken() {
   return await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
 }
@@ -22,77 +20,128 @@ export async function getStoredRefreshToken() {
   return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 }
 
-// Authenticate with Premiumize
-export async function authenticatePremiumize() {
+export async function authenticatePremiumize(): Promise<string> {
   try {
-    // Check if we already have a token
+    console.log("Expo Config Extra:", Constants.expoConfig?.extra);
+    if (!PREMIUMIZE_CLIENT_ID || !PREMIUMIZE_CLIENT_SECRET) {
+      throw new Error("Missing PREMIUMIZE_CLIENT_ID or PREMIUMIZE_CLIENT_SECRET in expoConfig.extra");
+    }
+
     const existingToken = await getStoredAccessToken();
     if (existingToken) {
-      // Verify the token is still valid
       const isValid = await verifyToken(existingToken);
       if (isValid) return existingToken;
     }
-    
-    // If we have a refresh token, try to refresh
+
     const refreshToken = await getStoredRefreshToken();
     if (refreshToken) {
       try {
         const newToken = await refreshAccessToken(refreshToken);
         if (newToken) return newToken;
       } catch (e) {
-        console.log("Failed to refresh token, proceeding to new authorization");
+        console.log("Failed to refresh token, proceeding to device code auth:", e);
       }
     }
-    
-    // Open browser for authorization
-    const authUrl = `https://www.premiumize.me/authorize?client_id=${PREMIUMIZE_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-    
-    const result = await WebBrowser.openAuthSessionAsync(
-      authUrl, 
-      REDIRECT_URI
+
+    // FIRST FIX: Step 1 - Request device code with correct parameters
+    console.log("Requesting device code with client_id:", PREMIUMIZE_CLIENT_ID);
+    const deviceCodeResponse = await axios.post(
+      PREMIUMIZE_TOKEN_URL,
+      qs.stringify({
+        client_id: PREMIUMIZE_CLIENT_ID,
+        response_type: "device_code" // CHANGED: Use response_type instead of grant_type here
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
     );
-    
-    if (result.type === 'success') {
-      const { url } = result;
-      // Extract authorization code from URL
-      const code = new URL(url).searchParams.get('code');
-      
-      if (code) {
-        // Exchange code for access token
-        const tokenResponse = await axios.post('https://www.premiumize.me/token', null, {
-          params: {
+
+    console.log("Full Device Code Response:", deviceCodeResponse.data);
+
+    const {
+      device_code,
+      user_code,
+      verification_uri,
+      expires_in,
+      interval,
+    } = deviceCodeResponse.data;
+
+    if (!device_code || !user_code || !verification_uri) {
+      throw new Error("Invalid device code response: missing required fields");
+    }
+
+    // Step 2: Instruct user to authenticate
+    console.log(`Please visit ${verification_uri} and enter code: ${user_code}`);
+    await Linking.openURL(verification_uri);
+    alert(`Please visit ${verification_uri} and enter this code: ${user_code}`);
+
+    // SECOND FIX: Step 3 - Poll for access token with correct parameters
+    const startTime = Date.now();
+    const expiresAt = startTime + (expires_in * 1000);
+
+    while (Date.now() < expiresAt) {
+      try {
+        const tokenResponse = await axios.post(
+          PREMIUMIZE_TOKEN_URL,
+          qs.stringify({
             client_id: PREMIUMIZE_CLIENT_ID,
             client_secret: PREMIUMIZE_CLIENT_SECRET,
-            code,
-            redirect_uri: REDIRECT_URI,
-            grant_type: 'authorization_code'
+            device_code: device_code,
+            grant_type: "device_code" // CHANGED: Use simple "device_code" not the long URN
+          }),
+          {
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
           }
-        });
-        
+        );
+
         const { access_token, refresh_token } = tokenResponse.data;
-        
-        // Store tokens securely
+        console.log("Tokens received:", { access_token, refresh_token });
+
         await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access_token);
         if (refresh_token) {
           await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh_token);
         }
-        
+
         return access_token;
+      } catch (err: any) {
+        const error = err.response?.data?.error;
+        if (error === "authorization_pending") {
+          console.log("Authorization pending, waiting...");
+          await new Promise((resolve) => setTimeout(resolve, (interval || 5) * 1000));
+          continue;
+        } else if (error === "slow_down") {
+          console.log("Polling too fast, increasing wait...");
+          await new Promise((resolve) => setTimeout(resolve, ((interval || 5) + 2) * 1000));
+          continue;
+        } else if (error === "access_denied") {
+          throw new Error("User denied access");
+        }
+        throw err;
       }
     }
-    
-    throw new Error("Authentication failed");
-  } catch (error) {
-    console.error("Premiumize authentication error:", error);
+
+    throw new Error("Device authentication timed out");
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      console.error("Premiumize authentication error:", error.message);
+    } else if (error && typeof error === 'object' && 'response' in error) {
+      const err = error as { response?: { data?: unknown } };
+      console.error("Premiumize authentication error:", err.response?.data || 'Unknown error');
+    } else {
+      console.error("Premiumize authentication error:", 'Unknown error');
+    }
     throw error;
   }
 }
 
-// Verify if token is still valid
-async function verifyToken(token: string) {
+async function verifyToken(token: string): Promise<boolean> {
   try {
     const response = await axios.get(`${PREMIUMIZE_API_BASE}/account/info`, {
-      params: { access_token: token }
+      params: { access_token: token },
     });
     return response.data.status === "success";
   } catch (e) {
@@ -100,62 +149,66 @@ async function verifyToken(token: string) {
   }
 }
 
-// Refresh access token
-async function refreshAccessToken(refreshToken: string) {
-  const response = await axios.post('https://www.premiumize.me/token', null, {
-    params: {
+async function refreshAccessToken(refreshToken: string): Promise<string> {
+  const response = await axios.post(
+    PREMIUMIZE_TOKEN_URL,
+    qs.stringify({
       client_id: PREMIUMIZE_CLIENT_ID,
       client_secret: PREMIUMIZE_CLIENT_SECRET,
       refresh_token: refreshToken,
-      grant_type: 'refresh_token'
+      grant_type: "refresh_token",
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
     }
-  });
-  
+  );
+
   const { access_token, refresh_token } = response.data;
-  
   await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access_token);
   if (refresh_token) {
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh_token);
   }
-  
   return access_token;
 }
 
-// Update your media URL function to use the authentication
-export async function getPremiumizeMediaUrl(traktId: number, type: "movie" | "show", episode?: { season: number; episode: number }): Promise<string> {
+export async function getPremiumizeMediaUrl(
+  traktId: number,
+  type: "movie" | "show",
+  episode?: { season: number; episode: number }
+): Promise<string> {
   try {
-    // Get or refresh token
     const accessToken = await authenticatePremiumize();
-    
-    // Construct query
-    const queryString = type === "movie" 
-      ? `trakt:movie:${traktId}` 
-      : `trakt:show:${traktId}:S${episode?.season.toString().padStart(2, '0')}E${episode?.episode.toString().padStart(2, '0')}`;
-    
+
+    const queryString =
+      type === "movie"
+        ? `trakt:movie:${traktId}`
+        : `trakt:show:${traktId}:S${episode?.season.toString().padStart(2, "0")}E${episode?.episode
+            .toString()
+            .padStart(2, "0")}`;
+
     console.log("Premiumize query:", queryString);
-    
+
     const searchResponse = await axios.get(`${PREMIUMIZE_API_BASE}/transfer/directdl`, {
       params: {
         access_token: accessToken,
         src: queryString,
       },
     });
-    
+
     console.log("Premiumize response status:", searchResponse.status);
-    
+
     const files = searchResponse.data.content;
     if (!files || files.length === 0) throw new Error("No media files found");
 
-    // Find the best video file
-    const videoFile = files.find((file: any) => 
-      file.path.endsWith(".mp4") || 
-      file.path.endsWith(".mkv") || 
-      file.path.endsWith(".avi")
+    const videoFile = files.find((file: any) =>
+      file.path.endsWith(".mp4") || file.path.endsWith(".mkv") || file.path.endsWith(".avi")
     );
-    
+
     if (!videoFile) throw new Error("No playable video file found");
 
-    return videoFile.link; // Direct streaming URL
+    return videoFile.link;
   } catch (err: any) {
     console.error("Premiumize Error:", err.response?.data || err.message);
     throw err;

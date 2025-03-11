@@ -50,6 +50,11 @@ module.exports = {
       REDIRECT_URI: process.env.REDIRECT_URI,
       
       TMDB_API: process.env.TMDB_API,
+
+      PREMIUMIZE_CLIENT_ID: process.env.PREMIUMIZE_CLIENT_ID,
+      PREMIUMIZE_CLIENT_SECRET: process.env.PREMIUMIZE_CLIENT_SECRET,
+      PREMIUMIZE_REDIRECT_URI: process.env.PREMIUMIZE_REDIRECT_URI,
+      PREMIUMIZE_API: process.env.PREMIUMIZE_API,
       
       "eas": {
         "projectId": "64f99d28-34cf-45ce-ade0-af9ec24a338d"
