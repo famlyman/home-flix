@@ -1,216 +1,154 @@
 import axios from "axios";
-import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
-import * as Linking from "expo-linking";
+import Constants from "expo-constants";
 import qs from "qs";
 
-const PREMIUMIZE_API_BASE = "https://www.premiumize.me/api";
-const PREMIUMIZE_TOKEN_URL = "https://www.premiumize.me/token";
-const PREMIUMIZE_CLIENT_ID = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_ID || "";
-const PREMIUMIZE_CLIENT_SECRET = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_SECRET || "";
+const BASE_URL = "https://www.premiumize.me/api";
+const TOKEN_URL = "https://www.premiumize.me/token";
+const CLIENT_ID = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_ID || "";
+const CLIENT_SECRET = Constants.expoConfig?.extra?.PREMIUMIZE_CLIENT_SECRET || "";
+const ACCESS_TOKEN_KEY = "premiumize_new_access_token";
 
-const ACCESS_TOKEN_KEY = "premiumize_access_token";
-const REFRESH_TOKEN_KEY = "premiumize_refresh_token";
-
-export async function getStoredAccessToken() {
-  return await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  throw new Error("Missing Premiumize CLIENT_ID or CLIENT_SECRET in expoConfig.extra");
 }
 
-export async function getStoredRefreshToken() {
-  return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-}
+const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 15000,
+  headers: { "User-Agent": "YourAppName" },
+});
 
-export async function authenticatePremiumize(): Promise<string> {
+console.log("⭐⭐ premiumizeNew.tsx loaded");
+
+export async function authenticate(
+  onCodeReceived: (url: string, code: string) => void
+): Promise<string> {
+  console.log("⭐⭐ Starting Premiumize auth");
   try {
-    console.log("Expo Config Extra:", Constants.expoConfig?.extra);
-    if (!PREMIUMIZE_CLIENT_ID || !PREMIUMIZE_CLIENT_SECRET) {
-      throw new Error("Missing PREMIUMIZE_CLIENT_ID or PREMIUMIZE_CLIENT_SECRET in expoConfig.extra");
-    }
-
-    const existingToken = await getStoredAccessToken();
-    if (existingToken) {
-      const isValid = await verifyToken(existingToken);
-      if (isValid) return existingToken;
-    }
-
-    const refreshToken = await getStoredRefreshToken();
-    if (refreshToken) {
-      try {
-        const newToken = await refreshAccessToken(refreshToken);
-        if (newToken) return newToken;
-      } catch (e) {
-        console.log("Failed to refresh token, proceeding to device code auth:", e);
-      }
-    }
-
-    // FIRST FIX: Step 1 - Request device code with correct parameters
-    console.log("Requesting device code with client_id:", PREMIUMIZE_CLIENT_ID);
-    const deviceCodeResponse = await axios.post(
-      PREMIUMIZE_TOKEN_URL,
+    const deviceResponse = await api.post(
+      TOKEN_URL,
       qs.stringify({
-        client_id: PREMIUMIZE_CLIENT_ID,
-        response_type: "device_code" // CHANGED: Use response_type instead of grant_type here
+        client_id: CLIENT_ID,
+        response_type: "device_code",
       }),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
+    console.log("⭐⭐ Device code response:", deviceResponse.data);
+    const { device_code, user_code, verification_uri, expires_in, interval } = deviceResponse.data;
 
-    console.log("Full Device Code Response:", deviceCodeResponse.data);
+    onCodeReceived(verification_uri, user_code);
 
-    const {
-      device_code,
-      user_code,
-      verification_uri,
-      expires_in,
-      interval,
-    } = deviceCodeResponse.data;
-
-    if (!device_code || !user_code || !verification_uri) {
-      throw new Error("Invalid device code response: missing required fields");
-    }
-
-    // Step 2: Instruct user to authenticate
-    console.log(`Please visit ${verification_uri} and enter code: ${user_code}`);
-    await Linking.openURL(verification_uri);
-    alert(`Please visit ${verification_uri} and enter this code: ${user_code}`);
-
-    // SECOND FIX: Step 3 - Poll for access token with correct parameters
-    const startTime = Date.now();
-    const expiresAt = startTime + (expires_in * 1000);
-
-    while (Date.now() < expiresAt) {
+    let totalWait = 0;
+    while (totalWait < expires_in) {
       try {
-        const tokenResponse = await axios.post(
-          PREMIUMIZE_TOKEN_URL,
+        const tokenResponse = await api.post(
+          TOKEN_URL,
           qs.stringify({
-            client_id: PREMIUMIZE_CLIENT_ID,
-            client_secret: PREMIUMIZE_CLIENT_SECRET,
-            device_code: device_code,
-            grant_type: "device_code" // CHANGED: Use simple "device_code" not the long URN
+            code: device_code,
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            grant_type: "device_code",
           }),
-          {
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-          }
+          { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
         );
-
-        const { access_token, refresh_token } = tokenResponse.data;
-        console.log("Tokens received:", { access_token, refresh_token });
-
+        const { access_token } = tokenResponse.data;
+        console.log("⭐⭐ Token received:", access_token.substring(0, 10) + "...");
         await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access_token);
-        if (refresh_token) {
-          await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh_token);
-        }
-
         return access_token;
-      } catch (err: any) {
-        const error = err.response?.data?.error;
-        if (error === "authorization_pending") {
-          console.log("Authorization pending, waiting...");
-          await new Promise((resolve) => setTimeout(resolve, (interval || 5) * 1000));
-          continue;
-        } else if (error === "slow_down") {
-          console.log("Polling too fast, increasing wait...");
-          await new Promise((resolve) => setTimeout(resolve, ((interval || 5) + 2) * 1000));
-          continue;
-        } else if (error === "access_denied") {
-          throw new Error("User denied access");
+      } catch (error: any) {
+        if (error.response?.data?.error === "authorization_pending") {
+          console.log("⭐⭐ Waiting for user to enter code...");
+          await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+          totalWait += interval;
+        } else {
+          console.error("⭐⭐ Token fetch error:", error.response?.data || error.message);
+          throw error;
         }
-        throw err;
       }
     }
-
-    throw new Error("Device authentication timed out");
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      console.error("Premiumize authentication error:", error.message);
-    } else if (error && typeof error === 'object' && 'response' in error) {
-      const err = error as { response?: { data?: unknown } };
-      console.error("Premiumize authentication error:", err.response?.data || 'Unknown error');
-    } else {
-      console.error("Premiumize authentication error:", 'Unknown error');
-    }
-    throw error;
+    throw new Error("Authentication timed out");
+  } catch (error) {
+    console.error("⭐⭐ Auth error:", error);
+    throw new Error("Failed to authenticate with Premiumize");
   }
 }
 
-async function verifyToken(token: string): Promise<boolean> {
+export async function isAuthenticated(): Promise<boolean> {
+  const token = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  if (!token) {
+    console.log("⭐⭐ No token found");
+    return false;
+  }
   try {
-    const response = await axios.get(`${PREMIUMIZE_API_BASE}/account/info`, {
+    const response = await api.get("/account/info", {
       params: { access_token: token },
     });
-    return response.data.status === "success";
-  } catch (e) {
+    const isValid = response.data.status === "success";
+    console.log("⭐⭐ Token valid:", isValid);
+    if (!isValid) await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+    return isValid;
+  } catch (error) {
+    console.error("⭐⭐ Token check failed:", error);
+    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
     return false;
   }
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<string> {
-  const response = await axios.post(
-    PREMIUMIZE_TOKEN_URL,
-    qs.stringify({
-      client_id: PREMIUMIZE_CLIENT_ID,
-      client_secret: PREMIUMIZE_CLIENT_SECRET,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
-  );
-
-  const { access_token, refresh_token } = response.data;
-  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access_token);
-  if (refresh_token) {
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh_token);
-  }
-  return access_token;
-}
-
-export async function getPremiumizeMediaUrl(
+export async function getMediaUrl(
   traktId: number,
   type: "movie" | "show",
   episode?: { season: number; episode: number }
 ): Promise<string> {
+  console.log("⭐⭐ getMediaUrl called:", { traktId, type, episode });
+  const token = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  if (!token) {
+    console.log("⭐⭐ No token for media fetch");
+    throw new Error("Not authenticated - please log in");
+  }
+
+  // Hardcoded folder_id from your Premiumize cloud for Gilligan's Island S01
+  const folderId = "eXx0f7aHLcze9gVghZUBRQ";
+  console.log("⭐⭐ Fetching files from folder:", folderId);
+
   try {
-    const accessToken = await authenticatePremiumize();
-
-    const queryString =
-      type === "movie"
-        ? `trakt:movie:${traktId}`
-        : `trakt:show:${traktId}:S${episode?.season.toString().padStart(2, "0")}E${episode?.episode
-            .toString()
-            .padStart(2, "0")}`;
-
-    console.log("Premiumize query:", queryString);
-
-    const searchResponse = await axios.get(`${PREMIUMIZE_API_BASE}/transfer/directdl`, {
-      params: {
-        access_token: accessToken,
-        src: queryString,
-      },
+    // List files in the folder
+    const folderResponse = await api.get("/folder/list", {
+      params: { access_token: token, id: folderId },
     });
+    console.log("⭐⭐ Folder list response:", JSON.stringify(folderResponse.data, null, 2));
 
-    console.log("Premiumize response status:", searchResponse.status);
+    if (folderResponse.data.status !== "success") {
+      throw new Error("Failed to list folder: " + folderResponse.data.message);
+    }
 
-    const files = searchResponse.data.content;
-    if (!files || files.length === 0) throw new Error("No media files found");
+    const files = folderResponse.data.content;
+    if (!files || !files.length) {
+      throw new Error("No files found in folder");
+    }
+
+    // Match the episode (e.g., "S01E01" for Two on a Raft)
+    const episodeStr = episode ? `S${episode.season.toString().padStart(2, "0")}E${episode.episode.toString().padStart(2, "0")}` : "";
+    console.log("⭐⭐ Looking for episode:", episodeStr);
 
     const videoFile = files.find((file: any) =>
-      file.path.endsWith(".mp4") || file.path.endsWith(".mkv") || file.path.endsWith(".avi")
+      file.name.includes(episodeStr) && /\.(mp4|mkv|avi)$/i.test(file.name)
     );
+    if (!videoFile) {
+      console.log("⭐⭐ Available files:", files.map((f: any) => f.name));
+      throw new Error(`No playable video file found for ${episodeStr}`);
+    }
 
-    if (!videoFile) throw new Error("No playable video file found");
-
+    console.log("⭐⭐ Found video file:", videoFile.name);
+    console.log("⭐⭐ Media URL:", videoFile.link);
     return videoFile.link;
-  } catch (err: any) {
-    console.error("Premiumize Error:", err.response?.data || err.message);
-    throw err;
+  } catch (error: any) {
+    console.error("⭐⭐ getMediaUrl error:", error.message, "Axios error:", error.response?.data || error);
+    throw error;
   }
+}
+
+export async function logout() {
+  await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+  console.log("⭐⭐ Logged out");
 }

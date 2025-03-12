@@ -83,6 +83,30 @@ export async function getAccessToken() {
   }
 }
 
+export async function refreshTraktToken() {
+  try {
+    const refreshToken = await SecureStore.getItemAsync("trakt_refresh_token");
+    if (!refreshToken) throw new Error("No refresh token available");
+
+    const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
+      refresh_token: refreshToken,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      grant_type: "refresh_token",
+    });
+    const { access_token, refresh_token: newRefreshToken } = response.data;
+    await Promise.all([
+      SecureStore.setItemAsync("trakt_access_token", access_token),
+      SecureStore.setItemAsync("trakt_refresh_token", newRefreshToken),
+    ]);
+    console.log("⭐⭐ Trakt token refreshed successfully");
+    return access_token;
+  } catch (err) {
+    console.error("⭐⭐ Token refresh failed:", err);
+    throw err;
+  }
+}
+
 export async function loginWithTrakt(
   onShowCode: (url: string, code: string) => void
 ) {
@@ -295,22 +319,26 @@ export async function removeFromTraktList(listId: string, itemId: number, type: 
     throw new Error('Failed to remove item from Trakt list');
   }
 }
+export async function scrobble(action: "start" | "pause" | "stop", type: string, id: number, progress: number, episode?: { season: number; episode: number }) {
+  const token = await getAccessToken();
+  const headers = { 
+    Authorization: `Bearer ${token}`, 
+    "Content-Type": "application/json",
+    "trakt-api-key": CLIENT_ID, 
+    "trakt-api-version": "2" 
+  };
 
-async function scrobble(action: "start" | "pause" | "stop", type: "movie" | "show", id: number, progress: number, episode?: { season: number; episode: number }) {
-  const payload = type === "movie" 
-    ? { movie: { ids: { trakt: id } }, progress }
-    : { show: { ids: { trakt: id } }, episode: { season: episode!.season, number: episode!.episode }, progress };
+  let body: any = {};
 
-  try {
-    const response = await axios.post(
-      `${TRAKT_API_URL}/scrobble/${action}`,
-      payload,
-      { headers: { "trakt-api-key": CLIENT_ID, "Content-Type": "application/json" } }
-    );
-    console.log(`Scrobble ${action} success:`, response.data);
-  } catch (err: any) {
-    console.error(`Scrobble ${action} error:`, err.message);
+  if (episode) {
+    body = { episode: { ids: { trakt: id }, season: episode.season, number: episode.episode }, progress };
+  } else {
+    if (type === "movie") {
+      body = { movie: { ids: { trakt: id } }, progress };
+    } else {
+      body = { show: { ids: { trakt: id } }, progress };
+    }
   }
-}
 
-export { scrobble };
+  return axios.post(`${TRAKT_API_URL}/scrobble/${action}`, body, { headers });
+}
