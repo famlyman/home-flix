@@ -44,14 +44,25 @@ serve(async (req: Request): Promise<Response> => {
       ? `${title} S${season!.toString().padStart(2, '0')}E${episode!.toString().padStart(2, '0')}`
       : `${title} ${year}`;
 
-    // Scrape 1337x with regex
+    // Scrape 1337x search page
     const searchUrl = `https://1337x.to/search/${encodeURIComponent(query)}/1/`;
     const searchResponse = await fetch(searchUrl);
     const searchHtml = await searchResponse.text();
-    const torrentMatch = searchHtml.match(/href="\/torrent\/\d+\/[^"]+"/);
-    if (!torrentMatch) throw new Error('No seeded torrents found');
-    const torrentLink = torrentMatch[0].replace('href="', '').replace('"', '');
 
+    // Find torrents with seeds
+    const torrentRows = searchHtml.split('<tr>');
+    let torrentLink: string | undefined;
+    for (const row of torrentRows) {
+      const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/);
+      const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/);
+      if (seedMatch && Number(seedMatch[1]) > 0 && linkMatch) {
+        torrentLink = linkMatch[0].replace('href="', '').replace('"', '');
+        break; // Take the first seeded torrent
+      }
+    }
+    if (!torrentLink) throw new Error('No seeded torrents found');
+
+    // Fetch torrent page
     const torrentPageResponse = await fetch(`https://1337x.to${torrentLink}`);
     const torrentHtml = await torrentPageResponse.text();
     const magnetMatch = torrentHtml.match(/href="magnet:[^"]+"/);
