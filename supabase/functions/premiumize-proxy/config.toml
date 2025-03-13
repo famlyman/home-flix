@@ -1,0 +1,2 @@
+[functions.premiumize-proxy]
+verify_jwt = false
