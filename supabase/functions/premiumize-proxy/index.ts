@@ -1,5 +1,5 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-// Trigger
+// Trigger again
 const PREMIUMIZE_API_URL = 'https://www.premiumize.me/api';
 
 serve(async (req: Request): Promise<Response> => {
