@@ -2,12 +2,27 @@ import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 
 const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 
+async function fetchWithTimeout(url: string, timeoutMs: number = 10000): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (error) {
+    throw new Error(`Fetch failed for ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function scrapeTorrentSites(query: string): Promise<string> {
-  const torrentSites = [ // Changed 'sites' to avoid potential reserved word confusion
+  const torrentSites = [
     {
       siteName: '1337x',
       getSearchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
       parseHtml: async (html: string) => {
+        console.log('Parsing 1337x HTML');
         const rows = html.split('<tr>').slice(1);
         for (const row of rows) {
           const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
@@ -16,7 +31,7 @@ async function scrapeTorrentSites(query: string): Promise<string> {
           const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
           console.log(`1337x - Seeds: ${seeds}, Link: ${link || 'none'}`);
           if (seeds > 0 && link) {
-            const torrentPage = await fetch(`https://1337x.to${link}`).then(r => r.text());
+            const torrentPage = await fetchWithTimeout(`https://1337x.to${link}`);
             const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
             return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
           }
@@ -28,6 +43,7 @@ async function scrapeTorrentSites(query: string): Promise<string> {
       siteName: 'LimeTorrents',
       getSearchUrl: (q: string) => `https://www.limetorrents.lol/search/all/${encodeURIComponent(q)}/seeds/1/`,
       parseHtml: async (html: string) => {
+        console.log('Parsing LimeTorrents HTML');
         const rows = html.split('<tr>').slice(1);
         for (const row of rows) {
           const seedMatch = row.match(/<td class="tdseed">(\d+)<\/td>/i);
@@ -36,7 +52,7 @@ async function scrapeTorrentSites(query: string): Promise<string> {
           const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
           console.log(`LimeTorrents - Seeds: ${seeds}, Link: ${link || 'none'}`);
           if (seeds > 0 && link) {
-            const torrentPage = await fetch(`https://www.limetorrents.lol${link}`).then(r => r.text());
+            const torrentPage = await fetchWithTimeout(`https://www.limetorrents.lol${link}`);
             const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
             return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
           }
@@ -48,6 +64,7 @@ async function scrapeTorrentSites(query: string): Promise<string> {
       siteName: 'YTS',
       getSearchUrl: (q: string) => `https://yts.mx/browse-movies/${encodeURIComponent(q)}/all/all/0/seeds`,
       parseHtml: async (html: string) => {
+        console.log('Parsing YTS HTML');
         const rows = html.split('<div class="browse-movie-wrap">').slice(1);
         for (const row of rows) {
           const seedMatch = row.match(/<span class="badge seeds">(\d+)<\/span>/i);
@@ -56,7 +73,7 @@ async function scrapeTorrentSites(query: string): Promise<string> {
           const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
           console.log(`YTS - Seeds: ${seeds}, Link: ${link || 'none'}`);
           if (seeds > 0 && link) {
-            const torrentPage = await fetch(link).then(r => r.text());
+            const torrentPage = await fetchWithTimeout(link);
             const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
             return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
           }
@@ -69,14 +86,18 @@ async function scrapeTorrentSites(query: string): Promise<string> {
   for (const site of torrentSites) {
     console.log(`Trying ${site.siteName}`);
     const searchUrl = site.getSearchUrl(query);
-    const searchHtml = await fetch(searchUrl).then(r => r.text());
-    console.log(`${site.siteName} HTML length: ${searchHtml.length}`);
-    const magnet = await site.parseHtml(searchHtml);
-    if (magnet) {
-      console.log(`${site.siteName} Magnet found: ${magnet}`);
-      return magnet;
+    try {
+      const searchHtml = await fetchWithTimeout(searchUrl);
+      console.log(`${site.siteName} HTML length: ${searchHtml.length}`);
+      const magnet = await site.parseHtml(searchHtml);
+      if (magnet) {
+        console.log(`${site.siteName} Magnet found: ${magnet}`);
+        return magnet;
+      }
+      console.log(`${site.siteName} - No seeded torrents found`);
+    } catch (error) {
+      console.log(`Error scraping ${site.siteName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-    console.log(`${site.siteName} - No seeded torrents found`);
   }
   throw new Error('No seeded torrents found across all sites');
 }
@@ -109,14 +130,9 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const traktResponse = await fetch(`https://api.trakt.tv/${type}s/${traktId}?extended=full`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': TRAKT_API_KEY,
-      },
-    });
-    const traktData = await traktResponse.json();
+    console.log('Fetching Trakt metadata');
+    const traktResponse = await fetchWithTimeout(`https://api.trakt.tv/${type}s/${traktId}?extended=full`, 5000);
+    const traktData = JSON.parse(traktResponse);
     const { title, year } = traktData;
     const query = episode
       ? `${title} S${season!.toString().padStart(2, '0')}E${episode!.toString().padStart(2, '0')}`
