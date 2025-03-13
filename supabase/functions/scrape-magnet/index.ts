@@ -1,5 +1,4 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-import * as cheerio from 'https://deno.land/x/cheerio@1.0.7/mod.ts'; // Import entire module
 
 const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 
@@ -45,27 +44,19 @@ serve(async (req: Request): Promise<Response> => {
       ? `${title} S${season!.toString().padStart(2, '0')}E${episode!.toString().padStart(2, '0')}`
       : `${title} ${year}`;
 
-    // Scrape 1337x
+    // Scrape 1337x with regex
     const searchUrl = `https://1337x.to/search/${encodeURIComponent(query)}/1/`;
     const searchResponse = await fetch(searchUrl);
     const searchHtml = await searchResponse.text();
-    const $ = cheerio.load(searchHtml); // Use cheerio.load directly
-
-    const torrentRow = $('table.table-list tr')
-      .filter((i: any, el: any) => Number($(el).find('.seeds').text()) > 0)
-      .first();
-    const torrentLink = torrentRow.find('a[href*="/torrent/"]').attr('href');
-    if (!torrentLink) {
-      throw new Error('No seeded torrents found');
-    }
+    const torrentMatch = searchHtml.match(/href="\/torrent\/\d+\/[^"]+"/);
+    if (!torrentMatch) throw new Error('No seeded torrents found');
+    const torrentLink = torrentMatch[0].replace('href="', '').replace('"', '');
 
     const torrentPageResponse = await fetch(`https://1337x.to${torrentLink}`);
     const torrentHtml = await torrentPageResponse.text();
-    const $torrent = cheerio.load(torrentHtml);
-    const magnet = $torrent('a[href^="magnet:"]').attr('href');
-    if (!magnet) {
-      throw new Error('No magnet link found');
-    }
+    const magnetMatch = torrentHtml.match(/href="magnet:[^"]+"/);
+    if (!magnetMatch) throw new Error('No magnet link found');
+    const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
 
     return new Response(JSON.stringify({ magnet }), {
       status: 200,
