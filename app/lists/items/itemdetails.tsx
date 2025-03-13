@@ -16,7 +16,7 @@ import MyLists from "../../../components/listModal";
 import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
 import { FlashList } from "@shopify/flash-list";
-import { getMediaUrl, isAuthenticated } from "../../../services/premiumize";
+import { getMediaUrl, isAuthenticated, logout } from "../../../services/premiumize";
 import PremiumizeAuthNew from "../../../screens/PremAuth";
 
 const TMDB_API_KEY = Constants.expoConfig?.extra?.TMDB_API;
@@ -60,6 +60,7 @@ export default function ItemDetailsScreen() {
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
   const [progress] = useState(0); // Simplified for now
   const [showAuth, setShowAuth] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
   const statusBarHeight = Constants.statusBarHeight;
   const numericId = parseInt(id, 10);
 
@@ -125,53 +126,32 @@ export default function ItemDetailsScreen() {
     console.log(`Selected ${episode.name}`);
   };
 
-  const [isFetching, setIsFetching] = useState(false);
-
   const handlePlayPress = async () => {
-    if (isFetching) {
-      console.log("⭐⭐ Already fetching, skipping...");
-      return;
-    }
-    console.log("⭐⭐ Selected:", selectedEpisode ? selectedEpisode.name : title);
+    if (isFetching) return;
     setIsFetching(true);
     setError(null);
     try {
       if (!(await isAuthenticated())) {
-        console.log("⭐⭐ Not authenticated, showing auth UI");
         setShowAuth(true);
         setIsFetching(false);
         return;
       }
-  
+      const testSourceUrl = "magnet:?xt=urn:btih:1C8D974D927C416C0B16EBE6D1683461EA05E0C5&dn=John+Wick+Chapter+4+2023+V2+1080p+HDTS+x264+AAC+-+HushRips&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.me%3A2970%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Fopentor.org%3A2710%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.cyberia.is%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.me%3A2980%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2940%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce";
       let url: string;
       if (type === "movie" && itemDetails) {
-        url = await getMediaUrl(numericId, "movie");
+        url = await getMediaUrl(numericId, "movie", undefined, testSourceUrl);
       } else if (type === "show" && selectedEpisode) {
-        url = await getMediaUrl(numericId, "show", {
-          season: selectedSeason!,
-          episode: selectedEpisode.episode_number,
-        });
+        url = await getMediaUrl(numericId, "show", { season: selectedSeason!, episode: selectedEpisode.episode_number }, testSourceUrl);
       } else {
         throw new Error("No playable content selected");
       }
-  
-      // Navigate to "/video" instead of "/player"
-      router.push({
-        pathname: "/video", // Changed from "/player"
-        params: {
-          mediaUrl: url,
-          title: selectedEpisode ? selectedEpisode.name : itemDetails!.title,
-          id: id,
-          type: type,
-          season: selectedSeason?.toString(),
-          episode: selectedEpisode?.episode_number.toString(),
-        },
-      });
+      router.push({ pathname: "/video", params: { mediaUrl: url, title: selectedEpisode ? selectedEpisode.name : itemDetails!.title, id, type, season: selectedSeason?.toString(), episode: selectedEpisode?.episode_number.toString() } });
     } catch (err: any) {
       console.error("⭐⭐ Play error:", err.message);
       setError(err.message || "Failed to fetch media URL");
       if (err.message.includes("authenticated")) {
-        setShowAuth(true);
+        await logout(); // Force logout
+        setShowAuth(true); // Trigger re-auth
       }
     } finally {
       setIsFetching(false);
@@ -179,7 +159,6 @@ export default function ItemDetailsScreen() {
   };
 
   const handleAuthComplete = (token: string) => {
-    console.log("⭐⭐ Auth completed with token:", token.substring(0, 10) + "...");
     setShowAuth(false);
     setError(null);
     handlePlayPress();

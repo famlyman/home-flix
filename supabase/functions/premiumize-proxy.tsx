@@ -1,51 +1,45 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const PREMIUMIZE_API_URL = 'https://www.premiumize.me/api';
-const PREMIUMIZE_API_KEY = Deno.env.get('PREMIUMIZE_API_KEY'); // Store in Supabase env vars
 
-serve(async (req) => {
+serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
   try {
-    const { sourceUrl } = await req.json();
-    if (!sourceUrl) {
-      return new Response(JSON.stringify({ error: 'Source URL is required' }), {
+    const body = await req.json();
+    const { sourceUrl, access_token } = body as { sourceUrl?: string; access_token?: string };
+
+    if (!sourceUrl || !access_token) {
+      return new Response(JSON.stringify({ error: 'Source URL and access token required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
+    const formData = new URLSearchParams();
+    formData.append('src', sourceUrl);
+    formData.append('access_token', access_token);
+
     const response = await fetch(`${PREMIUMIZE_API_URL}/transfer/directdl`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        src: sourceUrl,
-        apikey: PREMIUMIZE_API_KEY,
-      }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
     });
 
-    const data = await response.json();
+    const data = await response.json() as { status: string; content?: { link: string }[]; message?: string };
+
     if (data.status === 'success' && data.content && data.content.length > 0) {
-      const streamUrl = data.content[0].link;
-      return new Response(JSON.stringify({ streamUrl }), {
+      return new Response(JSON.stringify({ streamUrl: data.content[0].link }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
-    } else {
-      throw new Error(data.message || 'No streamable link found');
     }
-  } catch (error) {
-    let errorMessage = 'An unknown error occurred';
-    if (error instanceof Error) {
-      errorMessage = error.message;
-    } else {
-      errorMessage = String(error);
-    }
+
+    throw new Error(data.message || 'No streamable link available');
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

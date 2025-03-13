@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { VideoView, useVideoPlayer, VideoPlayer } from "expo-video";
 import { useEvent } from "expo";
 import { scrobble } from "../../services/traktapi";
-import { debounce, DebouncedFunc } from "lodash"; // Ensure lodash is imported with types
+import { debounce, DebouncedFunc } from "lodash";
+import { scrapePremiumizeLink } from "../../screens/Scraper"; // Adjust path as needed
 
 export default function PlayerScreen() {
   const { mediaUrl, title, id, type, season, episode } = useLocalSearchParams<{
@@ -22,20 +23,50 @@ export default function PlayerScreen() {
 
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [isScraping, setIsScraping] = useState(false);
   const lastScrobbleState = useRef<"start" | "pause" | null>(null);
 
-  const player = useVideoPlayer(mediaUrl || "", (player: VideoPlayer) => {
-    
-    player.play();
+  // Scrape the mediaUrl on mount if it's not a direct link
+  useEffect(() => {
+    const resolveUrl = async () => {
+      setIsScraping(true);
+      try {
+        // For now, assume any non-HTTP/HTTPS URL needs scraping (e.g., magnet links)
+        if (!mediaUrl.startsWith('http')) {
+          const streamUrl = await scrapePremiumizeLink(mediaUrl);
+          setResolvedUrl(streamUrl);
+        } else {
+          setResolvedUrl(mediaUrl); // Assume it's already a direct link
+        }
+      } catch (err: any) {
+        setError(
+          `Failed to resolve URL: ${err.message || "Unknown error"}`
+        );
+      } finally {
+        setIsScraping(false);
+      }
+    };
+
+    if (mediaUrl) {
+      resolveUrl();
+    } else {
+      setError("No media URL provided");
+    }
+  }, [mediaUrl]);
+
+  // Initialize player only after URL is resolved
+  const player = useVideoPlayer(resolvedUrl || "", (player: VideoPlayer) => {
+    if (resolvedUrl) {
+      player.play();
+    }
   });
 
   const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
   const playerStatus = useEvent(player, "statusChange", {
     status: player.status,
     callback: (status: any, details?: { error?: string }) => {
-      
       if (status === "error" && details?.error) {
-        
         setError(`Playback error: ${details.error}`);
       }
     },
@@ -52,12 +83,19 @@ export default function PlayerScreen() {
   // Scrobble on completion
   useEffect(() => {
     if (player.duration > 0 && player.currentTime >= player.duration - 0.5) {
-      scrobble("stop", type, numericId, progress, seasonNum && episodeNum ? { season: seasonNum, episode: episodeNum } : undefined)
-        .catch((err: { message: any; }) => (err.message));
+      scrobble(
+        "stop",
+        type,
+        numericId,
+        progress,
+        seasonNum && episodeNum ? { season: seasonNum, episode: episodeNum } : undefined
+      ).catch((err: any) =>
+        console.error("Scrobble stop error:", err.message || "Unknown error")
+      );
     }
   }, [player.currentTime, player.duration, type, numericId, progress, seasonNum, episodeNum]);
 
-  // Debounced scrobble function with explicit typing
+  // Debounced scrobble function
   const scrobbleDebounced = useRef<DebouncedFunc<(
     action: "start" | "pause",
     type: "movie" | "show",
@@ -77,9 +115,11 @@ export default function PlayerScreen() {
           .then(() => {
             lastScrobbleState.current = action;
           })
-          .catch((err: { message: any; }) => (err.message));
+          .catch((err: any) =>
+            console.error("Scrobble error:", err.message || "Unknown error")
+          );
       },
-      1000 // 1-second debounce
+      1000
     )
   ).current;
 
@@ -90,9 +130,17 @@ export default function PlayerScreen() {
     const action = isPlaying ? "start" : "pause";
     if (lastScrobbleState.current === action) return;
 
-   
     scrobbleDebounced(action, type, numericId, progress, seasonNum && episodeNum ? { season: seasonNum, episode: episodeNum } : undefined);
   }, [isPlaying, type, numericId, seasonNum, episodeNum, player.duration, scrobbleDebounced]);
+
+  if (isScraping) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#1E88E5" />
+        <Text style={styles.progressText}>Resolving URL...</Text>
+      </View>
+    );
+  }
 
   if (error) {
     return (
