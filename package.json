@@ -25,7 +25,9 @@
     "dotenv": "^16.4.7",
     "expo": "~52.0.38",
     "expo-blur": "~14.0.3",
+    "expo-clipboard": "~7.0.1",
     "expo-constants": "~17.0.8",
+    "expo-dev-client": "~5.0.13",
     "expo-font": "~13.0.4",
     "expo-haptics": "~14.0.1",
     "expo-linking": "~7.0.5",
@@ -50,8 +52,7 @@
     "react-native-screens": "~4.4.0",
     "react-native-vector-icons": "^10.2.0",
     "react-native-web": "~0.19.13",
-    "react-native-webview": "13.12.5",
-    "expo-clipboard": "~7.0.1"
+    "react-native-webview": "13.12.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -64,6 +65,7 @@
     "jest-expo": "~52.0.6",
     "prettier": "3.5.3",
     "react-test-renderer": "18.3.1",
+    "supabase": "^2.19.6",
     "typescript": "^5.3.3"
   },
   "private": true

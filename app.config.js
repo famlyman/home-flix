@@ -18,7 +18,8 @@ module.exports = {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.famlyman.homeflix"
     },
     "web": {
       "bundler": "metro",
@@ -55,11 +56,12 @@ module.exports = {
       PREMIUMIZE_CLIENT_SECRET: process.env.PREMIUMIZE_CLIENT_SECRET,
       PREMIUMIZE_REDIRECT_URI: process.env.PREMIUMIZE_REDIRECT_URI,
       PREMIUMIZE_API: process.env.PREMIUMIZE_API,
-      
+
       "eas": {
         "projectId": "64f99d28-34cf-45ce-ade0-af9ec24a338d"
       }
     },
+    
     "owner": "famlyman"
   
     // other expo config

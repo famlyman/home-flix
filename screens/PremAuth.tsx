@@ -16,54 +16,53 @@ const PremiumizeAuthNew = ({ onAuthComplete }: PremiumizeAuthProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  console.log("⭐⭐ PremiumizeAuthNew rendered");
-
+  
   useEffect(() => {
-    console.log("⭐⭐ PremiumizeAuthNew useEffect");
+    
     checkAndAuthenticate();
   }, []);
 
   const checkAndAuthenticate = async () => {
-    console.log("⭐⭐ Checking authentication");
+    
     try {
       if (await isAuthenticated()) {
-        console.log("⭐⭐ Already authenticated");
+        
         const token = await SecureStore.getItemAsync("premiumize_new_access_token") || "";
         setLoading(false);
         onAuthComplete(token);
       } else {
-        console.log("⭐⭐ Not authenticated, starting flow");
+        
         startAuth();
       }
     } catch (err) {
-      console.error("⭐⭐ Auth check error:", err);
+      
       setError("Failed to check auth status");
       setLoading(false);
     }
   };
 
   const startAuth = async () => {
-    console.log("⭐⭐ Initiating auth flow");
+    
     try {
       const token = await authenticate((url: React.SetStateAction<string | null>, code: React.SetStateAction<string | null>) => {
-        console.log("⭐⭐ Displaying code:", code, "at", url);
+        
         setVerificationUri(url);
         setUserCode(code);
         setModalVisible(true);
       });
-      console.log("⭐⭐ Authentication successful:", token.substring(0, 10) + "...");
+      
       setModalVisible(false);
       setLoading(false);
       onAuthComplete(token);
     } catch (err: any) {
-      console.error("⭐⭐ Auth flow error:", err);
+      
       setError(err.message || "Authentication failed");
       setLoading(false);
     }
   };
 
   const dismissModal = () => {
-    console.log("⭐⭐ Modal dismissed");
+    
     setModalVisible(false);
   };
 

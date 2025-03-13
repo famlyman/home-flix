@@ -25,7 +25,7 @@ export default function PlayerScreen() {
   const lastScrobbleState = useRef<"start" | "pause" | null>(null);
 
   const player = useVideoPlayer(mediaUrl || "", (player: VideoPlayer) => {
-    console.log("⭐⭐ Player initialized with URL:", mediaUrl);
+    
     player.play();
   });
 
@@ -33,9 +33,9 @@ export default function PlayerScreen() {
   const playerStatus = useEvent(player, "statusChange", {
     status: player.status,
     callback: (status: any, details?: { error?: string }) => {
-      console.log("⭐⭐ Player status:", status, "Details:", details || "");
+      
       if (status === "error" && details?.error) {
-        console.error("⭐⭐ Player error:", details.error);
+        
         setError(`Playback error: ${details.error}`);
       }
     },
@@ -53,7 +53,7 @@ export default function PlayerScreen() {
   useEffect(() => {
     if (player.duration > 0 && player.currentTime >= player.duration - 0.5) {
       scrobble("stop", type, numericId, progress, seasonNum && episodeNum ? { season: seasonNum, episode: episodeNum } : undefined)
-        .catch((err: { message: any; }) => console.error("⭐⭐ Scrobble stop error:", err.message));
+        .catch((err: { message: any; }) => (err.message));
     }
   }, [player.currentTime, player.duration, type, numericId, progress, seasonNum, episodeNum]);
 
@@ -77,7 +77,7 @@ export default function PlayerScreen() {
           .then(() => {
             lastScrobbleState.current = action;
           })
-          .catch((err: { message: any; }) => console.error(`⭐⭐ Scrobble ${action} error:`, err.message));
+          .catch((err: { message: any; }) => (err.message));
       },
       1000 // 1-second debounce
     )
@@ -90,7 +90,7 @@ export default function PlayerScreen() {
     const action = isPlaying ? "start" : "pause";
     if (lastScrobbleState.current === action) return;
 
-    console.log(`⭐⭐ Video ${action}ed`);
+   
     scrobbleDebounced(action, type, numericId, progress, seasonNum && episodeNum ? { season: seasonNum, episode: episodeNum } : undefined);
   }, [isPlaying, type, numericId, seasonNum, episodeNum, player.duration, scrobbleDebounced]);
 
