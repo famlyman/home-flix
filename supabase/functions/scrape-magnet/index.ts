@@ -2,6 +2,85 @@ import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 
 const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 
+async function scrapeTorrentSites(query: string): Promise<string> {
+  const sites = [
+    {
+      name: '1337x',
+      searchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
+      parse: (html: string) => {
+        const rows = html.split('<tr>').slice(1);
+        for (const row of rows) {
+          const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
+          const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/i);
+          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
+          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
+          console.log(`1337x - Seeds: ${seeds}, Link: ${link}`);
+          if (seeds > 0 && link) {
+            const torrentPage = await fetch(`https://1337x.to${link}`).then(r => r.text());
+            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
+            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
+          }
+        }
+        return null;
+      },
+    },
+    {
+      name: 'LimeTorrents',
+      searchUrl: (q: string) => `https://www.limetorrents.lol/search/all/${encodeURIComponent(q)}/seeds/1/`,
+      parse: (html: string) => {
+        const rows = html.split('<tr>').slice(1);
+        for (const row of rows) {
+          const seedMatch = row.match(/<td class="tdseed">(\d+)<\/td>/i);
+          const linkMatch = row.match(/href="\/[^"]+-torrent-\d+\.html"/i);
+          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
+          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
+          console.log(`LimeTorrents - Seeds: ${seeds}, Link: ${link}`);
+          if (seeds > 0 && link) {
+            const torrentPage = await fetch(`https://www.limetorrents.lol${link}`).then(r => r.text());
+            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
+            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
+          }
+        }
+        return null;
+      },
+    },
+    {
+      name: 'YTS',
+      searchUrl: (q: string) => `https://yts.mx/browse-movies/${encodeURIComponent(q)}/all/all/0/seeds`,
+      parse: (html: string) => {
+        const rows = html.split('<div class="browse-movie-wrap">').slice(1);
+        for (const row of rows) {
+          const seedMatch = row.match(/<span class="badge seeds">(\d+)<\/span>/i);
+          const linkMatch = row.match(/href="https:\/\/yts\.mx\/movies\/[^"]+"/i);
+          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
+          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
+          console.log(`YTS - Seeds: ${seeds}, Link: ${link}`);
+          if (seeds > 0 && link) {
+            const torrentPage = await fetch(link).then(r => r.text());
+            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
+            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
+          }
+        }
+        return null;
+      },
+    },
+  ];
+
+  for (const site of sites) {
+    console.log(`Trying ${site.name}`);
+    const searchUrl = site.searchUrl(query);
+    const searchHtml = await fetch(searchUrl).then(r => r.text());
+    console.log(`${site.name} HTML length: ${searchHtml.length}`);
+    const magnet = await site.parse(searchHtml);
+    if (magnet) {
+      console.log(`${site.name} Magnet found: ${magnet}`);
+      return magnet;
+    }
+    console.log(`${site.name} - No seeded torrents found`);
+  }
+  throw new Error('No seeded torrents found across all sites');
+}
+
 serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
@@ -30,7 +109,6 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // Fetch Trakt metadata
     const traktResponse = await fetch(`https://api.trakt.tv/${type}s/${traktId}?extended=full`, {
       headers: {
         'Content-Type': 'application/json',
@@ -45,41 +123,7 @@ serve(async (req: Request): Promise<Response> => {
       : `${title} ${year}`;
     console.log(`Search query: ${query}`);
 
-    // Scrape 1337x
-    const searchUrl = `https://1337x.to/search/${encodeURIComponent(query)}/1/`;
-    console.log(`Search URL: ${searchUrl}`);
-    const searchResponse = await fetch(searchUrl);
-    const searchHtml = await searchResponse.text();
-    console.log(`Search HTML length: ${searchHtml.length}`);
-
-    // Find torrents with seeds
-    const torrentRows = searchHtml.split('<tr>').slice(1); // Skip first <tr> (header)
-    let torrentLink: string | undefined;
-    for (const row of torrentRows) {
-      const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
-      const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/i);
-      const seeds = seedMatch ? Number(seedMatch[1]) : 0;
-      const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : 'none';
-      console.log(`Row - Seeds: ${seeds}, Link: ${link}`);
-      if (seeds > 0 && link !== 'none') {
-        torrentLink = link;
-        console.log(`Selected torrent: ${torrentLink}`);
-        break;
-      }
-    }
-    if (!torrentLink) {
-      console.log('No seeded torrents matched in search results');
-      throw new Error('No seeded torrents found');
-    }
-
-    // Fetch torrent page
-    const torrentPageResponse = await fetch(`https://1337x.to${torrentLink}`);
-    const torrentHtml = await torrentPageResponse.text();
-    const magnetMatch = torrentHtml.match(/href="magnet:[^"]+"/i);
-    if (!magnetMatch) throw new Error('No magnet link found');
-    const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
-    console.log(`Magnet found: ${magnet}`);
-
+    const magnet = await scrapeTorrentSites(query);
     return new Response(JSON.stringify({ magnet }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
