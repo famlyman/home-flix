@@ -1,8 +1,7 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-import { load } from 'https://deno.land/x/cheerio@1.0.7/mod.ts'; // Deno-compatible cheerio
-import { DOMParser } from 'https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts'; // DOM parsing for Deno
+import * as cheerio from 'https://deno.land/x/cheerio@1.0.7/mod.ts'; // Import entire module
 
-const TRAKT_API_KEY = Deno.env.get('TCLIENT_ID'); // Fetch from Supabase env vars
+const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 
 serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') {
@@ -50,7 +49,7 @@ serve(async (req: Request): Promise<Response> => {
     const searchUrl = `https://1337x.to/search/${encodeURIComponent(query)}/1/`;
     const searchResponse = await fetch(searchUrl);
     const searchHtml = await searchResponse.text();
-    const $ = load(searchHtml); // Cheerio in Deno
+    const $ = cheerio.load(searchHtml); // Use cheerio.load directly
 
     const torrentRow = $('table.table-list tr')
       .filter((i: any, el: any) => Number($(el).find('.seeds').text()) > 0)
@@ -62,7 +61,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const torrentPageResponse = await fetch(`https://1337x.to${torrentLink}`);
     const torrentHtml = await torrentPageResponse.text();
-    const $torrent = load(torrentHtml);
+    const $torrent = cheerio.load(torrentHtml);
     const magnet = $torrent('a[href^="magnet:"]').attr('href');
     if (!magnet) {
       throw new Error('No magnet link found');
