@@ -1,13 +1,19 @@
-import Constants from 'expo-constants';
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 import { load } from 'https://deno.land/x/cheerio@1.0.7/mod.ts'; // Deno-compatible cheerio
 import { DOMParser } from 'https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts'; // DOM parsing for Deno
 
-const TRAKT_API_KEY = Constants.expoConfig?.extra?.CLIENT_ID || ''; // Replace with your Trakt API key
+const TRAKT_API_KEY = Deno.env.get('TCLIENT_ID'); // Fetch from Supabase env vars
 
 serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (!TRAKT_API_KEY) {
+    return new Response(JSON.stringify({ error: 'TRAKT_API_KEY not configured' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   try {
