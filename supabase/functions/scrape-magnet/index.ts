@@ -45,31 +45,37 @@ serve(async (req: Request): Promise<Response> => {
       : `${title} ${year}`;
     console.log(`Search query: ${query}`);
 
-    // Scrape 1337x search page
+    // Scrape 1337x
     const searchUrl = `https://1337x.to/search/${encodeURIComponent(query)}/1/`;
     console.log(`Search URL: ${searchUrl}`);
     const searchResponse = await fetch(searchUrl);
     const searchHtml = await searchResponse.text();
+    console.log(`Search HTML length: ${searchHtml.length}`);
 
     // Find torrents with seeds
-    const torrentRows = searchHtml.split('<tr>');
+    const torrentRows = searchHtml.split('<tr>').slice(1); // Skip first <tr> (header)
     let torrentLink: string | undefined;
     for (const row of torrentRows) {
-      const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/);
-      const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/);
-      console.log(`Row - Seeds: ${seedMatch ? seedMatch[1] : 'none'}, Link: ${linkMatch ? linkMatch[0] : 'none'}`);
-      if (seedMatch && Number(seedMatch[1]) > 0 && linkMatch) {
-        torrentLink = linkMatch[0].replace('href="', '').replace('"', '');
+      const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
+      const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/i);
+      const seeds = seedMatch ? Number(seedMatch[1]) : 0;
+      const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : 'none';
+      console.log(`Row - Seeds: ${seeds}, Link: ${link}`);
+      if (seeds > 0 && link !== 'none') {
+        torrentLink = link;
         console.log(`Selected torrent: ${torrentLink}`);
         break;
       }
     }
-    if (!torrentLink) throw new Error('No seeded torrents found');
+    if (!torrentLink) {
+      console.log('No seeded torrents matched in search results');
+      throw new Error('No seeded torrents found');
+    }
 
     // Fetch torrent page
     const torrentPageResponse = await fetch(`https://1337x.to${torrentLink}`);
     const torrentHtml = await torrentPageResponse.text();
-    const magnetMatch = torrentHtml.match(/href="magnet:[^"]+"/);
+    const magnetMatch = torrentHtml.match(/href="magnet:[^"]+"/i);
     if (!magnetMatch) throw new Error('No magnet link found');
     const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
     console.log(`Magnet found: ${magnet}`);
@@ -80,6 +86,7 @@ serve(async (req: Request): Promise<Response> => {
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.log(`Error: ${errorMessage}`);
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
