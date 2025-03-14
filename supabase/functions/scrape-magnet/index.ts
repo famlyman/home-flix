@@ -6,12 +6,12 @@ async function scrapeTorrentSites(query: string): Promise<string> {
   const sites = [
     {
       name: 'YTS',
-      searchUrl: (q: string) => `https://yts.mx/movies/${encodeURIComponent(query.split(' ').join('-').toLowerCase())}`,
+      searchUrl: (q: string) => `https://yts.mx/movies/${encodeURIComponent(q.split(' ').join('-').toLowerCase())}`,
       parse: async (html: string) => {
         console.log('Parsing YTS, HTML snippet:', html.slice(0, 500));
-        const magnetMatch = html.match(/href="magnet:[^"]+"/i);
-        if (magnetMatch) {
-          const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
+        const magnetMatches = [...html.matchAll(/href="(magnet:[^"]+)"/gi)];
+        if (magnetMatches.length > 0) {
+          const magnet = magnetMatches[0][1]; // First match
           console.log('Magnet found:', magnet);
           return magnet;
         }
@@ -31,7 +31,10 @@ async function scrapeTorrentSites(query: string): Promise<string> {
       },
     });
     console.log(`Status: ${response.status}`);
-    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+    if (!response.ok) {
+      console.log(`Skipping ${site.name} due to ${response.status}`);
+      continue; // Skip to next site instead of throwing
+    }
     const searchHtml = await response.text();
     console.log(`${site.name} HTML length: ${searchHtml.length}`);
     const magnet = await site.parse(searchHtml);
