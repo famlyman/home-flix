@@ -8,18 +8,26 @@ async function scrapeTorrentSites(query: string): Promise<string> {
       name: '1337x',
       searchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
       parse: async (html: string) => {
-        console.log('Parsing 1337x');
+        console.log('Parsing 1337x, HTML snippet:', html.slice(0, 200));
         const rows = html.split('<tr>').slice(1);
         for (const row of rows) {
           const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
           const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/i);
           const seeds = seedMatch ? Number(seedMatch[1]) : 0;
           const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
-          console.log(`1337x - Seeds: ${seeds}, Link: ${link || 'none'}`);
+          console.log(`1337x Row - Seeds: ${seeds}, Link: ${link || 'none'}`);
           if (seeds > 0 && link) {
-            const torrentPage = await fetch(`https://1337x.to${link}`).then(r => r.text());
+            console.log('Fetching torrent page:', link);
+            const torrentPage = await fetch(`https://1337x.to${link}`, {
+              headers: { 'User-Agent': 'Mozilla/5.0' },
+            }).then(r => r.text());
+            console.log('Torrent page snippet:', torrentPage.slice(0, 200));
             const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
-            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
+            if (magnetMatch) {
+              const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
+              console.log('Magnet found:', magnet);
+              return magnet;
+            }
           }
         }
         return null;
@@ -29,7 +37,11 @@ async function scrapeTorrentSites(query: string): Promise<string> {
 
   for (const site of sites) {
     console.log(`Trying ${site.name}`);
-    const searchHtml = await fetch(site.searchUrl(query)).then(r => r.text());
+    const response = await fetch(site.searchUrl(query), {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    console.log(`Status: ${response.status}`);
+    const searchHtml = await response.text();
     console.log(`${site.name} HTML length: ${searchHtml.length}`);
     const magnet = await site.parse(searchHtml);
     if (magnet) return magnet;
@@ -44,14 +56,16 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const bodyText = await req.text(); // Use text instead of json
+    const bodyText = await req.text();
     console.log('Raw body:', bodyText);
     const body = JSON.parse(bodyText);
     const { traktId, type } = body;
 
+    if (!TRAKT_API_KEY) throw new Error('TRAKT_API_KEY not set');
     const traktResponse = await fetch(`https://api.trakt.tv/${type}s/${traktId}?extended=full`, {
       headers: { 'trakt-api-key': TRAKT_API_KEY },
     }).then(r => r.text());
+    console.log('Trakt response snippet:', traktResponse.slice(0, 200));
     const traktData = JSON.parse(traktResponse);
     const query = `${traktData.title} ${traktData.year}`;
     console.log('Query:', query);
@@ -63,6 +77,9 @@ serve(async (req: Request): Promise<Response> => {
     });
   } catch (error) {
     console.log('Error:', error instanceof Error ? error.message : 'Unknown');
-    return new Response(JSON.stringify({ error: 'Failed to scrape' }), { status: 500 });
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to scrape' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 });
