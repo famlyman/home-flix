@@ -5,31 +5,17 @@ const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 async function scrapeTorrentSites(query: string): Promise<string> {
   const sites = [
     {
-      name: '1337x',
-      searchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
+      name: 'YTS',
+      searchUrl: (q: string) => `https://yts.mx/movies/${encodeURIComponent(query.split(' ').join('-').toLowerCase())}`,
       parse: async (html: string) => {
-        console.log('Parsing 1337x, HTML snippet:', html.slice(0, 200));
-        const rows = html.split('<tr>').slice(1);
-        for (const row of rows) {
-          const seedMatch = row.match(/<td class="coll-2 seeds">(\d+)<\/td>/i);
-          const linkMatch = row.match(/href="\/torrent\/\d+\/[^"]+"/i);
-          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
-          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
-          console.log(`1337x Row - Seeds: ${seeds}, Link: ${link || 'none'}`);
-          if (seeds > 0 && link) {
-            console.log('Fetching torrent page:', link);
-            const torrentPage = await fetch(`https://1337x.to${link}`, {
-              headers: { 'User-Agent': 'Mozilla/5.0' },
-            }).then(r => r.text());
-            console.log('Torrent page snippet:', torrentPage.slice(0, 200));
-            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
-            if (magnetMatch) {
-              const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
-              console.log('Magnet found:', magnet);
-              return magnet;
-            }
-          }
+        console.log('Parsing YTS, HTML snippet:', html.slice(0, 500));
+        const magnetMatch = html.match(/href="magnet:[^"]+"/i);
+        if (magnetMatch) {
+          const magnet = magnetMatch[0].replace('href="', '').replace('"', '');
+          console.log('Magnet found:', magnet);
+          return magnet;
         }
+        console.log('No magnet in YTS page');
         return null;
       },
     },
@@ -38,9 +24,14 @@ async function scrapeTorrentSites(query: string): Promise<string> {
   for (const site of sites) {
     console.log(`Trying ${site.name}`);
     const response = await fetch(site.searchUrl(query), {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
     });
     console.log(`Status: ${response.status}`);
+    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
     const searchHtml = await response.text();
     console.log(`${site.name} HTML length: ${searchHtml.length}`);
     const magnet = await site.parse(searchHtml);
