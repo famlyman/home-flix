@@ -136,12 +136,11 @@ export default function ItemDetailsScreen() {
         setIsFetching(false);
         return;
       }
-      const testSourceUrl = "magnet:?xt=urn:btih:1C8D974D927C416C0B16EBE6D1683461EA05E0C5&dn=John+Wick+Chapter+4+2023+V2+1080p+HDTS+x264+AAC+-+HushRips&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.me%3A2970%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Fopentor.org%3A2710%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.cyberia.is%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.me%3A2980%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2940%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce";
       let url: string;
       if (type === "movie" && itemDetails) {
-        url = await getMediaUrl(numericId, "movie", undefined, testSourceUrl);
+        url = await getMediaUrl(numericId, "movie"); // No sourceUrl, force scrape
       } else if (type === "show" && selectedEpisode) {
-        url = await getMediaUrl(numericId, "show", { season: selectedSeason!, episode: selectedEpisode.episode_number }, testSourceUrl);
+        url = await getMediaUrl(numericId, "show", { season: selectedSeason!, episode: selectedEpisode.episode_number });
       } else {
         throw new Error("No playable content selected");
       }
@@ -150,8 +149,8 @@ export default function ItemDetailsScreen() {
       console.error("⭐⭐ Play error:", err.message);
       setError(err.message || "Failed to fetch media URL");
       if (err.message.includes("authenticated")) {
-        await logout(); // Force logout
-        setShowAuth(true); // Trigger re-auth
+        await logout();
+        setShowAuth(true);
       }
     } finally {
       setIsFetching(false);
