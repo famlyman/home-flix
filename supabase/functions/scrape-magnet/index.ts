@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 
-const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'; // Updated UA
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const ACCEPT = 'text/html,application/xhtml+xml,application/json;q=0.9,image/webp,*/*;q=0.8';
 
 interface TorrentSite {
@@ -15,9 +14,9 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, options);
-      if (response.status === 403) {
-        console.log(`Retrying due to 403 at attempt ${i + 1}`);
-        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000)); // Backoff
+      if (response.status === 403 || response.status === 429) {
+        console.log(`Retrying due to ${response.status} at attempt ${i + 1}`);
+        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
         continue;
       }
       if (response.status < 500 || response.ok) return response;
@@ -32,7 +31,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
 
 async function scrapeTorrentSites(query: string, type: string): Promise<string> {
   console.log(`Searching for: "${query}" (${type})`);
-  
+
   const sites: TorrentSite[] = [
     {
       name: 'YTS',
@@ -43,12 +42,96 @@ async function scrapeTorrentSites(query: string, type: string): Promise<string> 
       parse: async (html: string) => {
         console.log('YTS HTML snippet:', html.slice(0, 1000));
         const magnetMatches = [...html.matchAll(/href="(magnet:[^"]+)"/gi)];
-        console.log(`Found ${magnetMatches.length} magnet links`);
+        console.log(`Found ${magnetMatches.length} magnet links on YTS`);
         if (magnetMatches.length > 0) {
           const hdMatch = magnetMatches.find(m => m[1].includes('1080p'));
           return hdMatch ? hdMatch[1] : magnetMatches[0][1];
         }
         return null;
+      },
+    },
+    {
+      name: '1337x',
+      searchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
+      parse: async (html: string) => {
+        console.log('1337x HTML snippet:', html.slice(0, 1000));
+        const torrentMatches = [...html.matchAll(/<a href="\/torrent\/[^"]+">([^<]+)<\/a>/gi)];
+        console.log(`Found ${torrentMatches.length} torrents on 1337x`);
+        if (torrentMatches.length === 0) return null;
+
+        const seedsMatches = [...html.matchAll(/<td class="coll-2 seeds">(\d+)<\/td>/gi)];
+        let bestTorrentUrl = '';
+        let maxSeeds = 0;
+
+        for (let i = 0; i < torrentMatches.length; i++) {
+          const torrentUrl = `https://1337x.to${torrentMatches[i][0].match(/href="([^"]+)"/)[1]}`;
+          const seeds = parseInt(seedsMatches[i]?.[1] || '0');
+          if (seeds > maxSeeds) {
+            maxSeeds = seeds;
+            bestTorrentUrl = torrentUrl;
+          }
+        }
+
+        if (!bestTorrentUrl) return null;
+
+        console.log(`Following 1337x torrent: ${bestTorrentUrl}`);
+        const torrentResponse = await fetchWithRetry(bestTorrentUrl, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Accept': ACCEPT,
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://1337x.to',
+          },
+        });
+        if (!torrentResponse.ok) return null;
+
+        const torrentHtml = await torrentResponse.text();
+        const magnetMatch = torrentHtml.match(/href="(magnet:[^"]+)"/i);
+        console.log(`Magnet found on 1337x: ${magnetMatch ? 'Yes' : 'No'}`);
+        return magnetMatch ? magnetMatch[1] : null;
+      },
+    },
+    {
+      name: 'PirateBay',
+      searchUrl: (q: string) => `https://pirateproxy.live/search/${encodeURIComponent(q)}/1/99/0`,
+      parse: async (html: string) => {
+        console.log('PirateBay HTML snippet:', html.slice(0, 1000));
+        const torrentMatches = [...html.matchAll(/<a href="\/torrent\/[^"]+" title="[^"]+">([^<]+)<\/a>/gi)];
+        console.log(`Found ${torrentMatches.length} torrents on PirateBay`);
+        if (torrentMatches.length === 0) return null;
+
+        const seedsMatches = [...html.matchAll(/<td align="right">(\d+)<\/td>/gi)];
+        let bestTorrentUrl = '';
+        let maxSeeds = 0;
+
+        for (let i = 0; i < torrentMatches.length; i++) {
+          const torrentUrlMatch = html.matchAll(/<a href="(\/torrent\/[^"]+)" title="[^"]+">/gi);
+          const urls = Array.from(torrentMatches);
+          const torrentUrl = `https://pirateproxy.live${urls[i][0].match(/href="([^"]+)"/)[1]}`;
+          const seeds = parseInt(seedsMatches[i]?.[1] || '0');
+          if (seeds > maxSeeds) {
+            maxSeeds = seeds;
+            bestTorrentUrl = torrentUrl;
+          }
+        }
+
+        if (!bestTorrentUrl) return null;
+
+        console.log(`Following PirateBay torrent: ${bestTorrentUrl}`);
+        const torrentResponse = await fetchWithRetry(bestTorrentUrl, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Accept': ACCEPT,
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://pirateproxy.live',
+          },
+        });
+        if (!torrentResponse.ok) return null;
+
+        const torrentHtml = await torrentResponse.text();
+        const magnetMatch = torrentHtml.match(/href="(magnet:[^"]+)"/i);
+        console.log(`Magnet found on PirateBay: ${magnetMatch ? 'Yes' : 'No'}`);
+        return magnetMatch ? magnetMatch[1] : null;
       },
     },
   ];
@@ -63,7 +146,7 @@ async function scrapeTorrentSites(query: string, type: string): Promise<string> 
           'User-Agent': USER_AGENT,
           'Accept': ACCEPT,
           'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': 'https://www.google.com', // Mimic browser
+          'Referer': 'https://www.google.com',
         },
       });
       console.log(`${site.name} Status: ${response.status}`);
@@ -102,38 +185,16 @@ serve(async (req: Request): Promise<Response> => {
   try {
     const body = await req.json();
     console.log('Request body:', JSON.stringify(body));
-    const { traktId, type } = body;
+    const { title, year, type } = body;
 
-    if (!traktId || !type) throw new Error('Missing required parameters: traktId and type');
+    if (!title || !type) throw new Error('Missing required parameters: title and type');
     if (!['movie', 'show'].includes(type)) throw new Error('Type must be "movie" or "show"');
-    if (!TRAKT_API_KEY) throw new Error('TRAKT_API_KEY not set');
 
-    const traktUrl = `https://api.trakt.tv/${type}s/${traktId}?extended=full`;
-    console.log('Trakt URL:', traktUrl);
-    const traktResponse = await fetchWithRetry(traktUrl, {
-      headers: {
-        'trakt-api-key': TRAKT_API_KEY,
-        'trakt-api-version': '2',
-        'Content-Type': 'application/json',
-        'User-Agent': USER_AGENT,
-        'Accept': ACCEPT,
-        'Referer': 'https://www.google.com',
-      },
-    });
-    console.log(`Trakt status: ${traktResponse.status}`);
-    if (!traktResponse.ok) {
-      const errorText = await traktResponse.text();
-      console.log('Trakt error response:', errorText);
-      throw new Error(`Trakt API failed with status: ${traktResponse.status}`);
-    }
-    const traktData = await traktResponse.json();
-    console.log('Trakt data:', JSON.stringify(traktData).slice(0, 200) + '...');
-
-    const query = traktData.year ? `${traktData.title} ${traktData.year}` : traktData.title;
+    const query = year ? `${title} ${year}` : title;
     console.log('Search query:', query);
 
     const magnet = await scrapeTorrentSites(query, type);
-    return new Response(JSON.stringify({ magnet, title: traktData.title, year: traktData.year }), {
+    return new Response(JSON.stringify({ magnet, title, year }), {
       status: 200,
       headers,
     });
