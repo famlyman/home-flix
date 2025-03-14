@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 
 const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'; // Updated UA
+const ACCEPT = 'text/html,application/xhtml+xml,application/json;q=0.9,image/webp,*/*;q=0.8';
 
 interface TorrentSite {
   name: string;
@@ -14,6 +15,11 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, options);
+      if (response.status === 403) {
+        console.log(`Retrying due to 403 at attempt ${i + 1}`);
+        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000)); // Backoff
+        continue;
+      }
       if (response.status < 500 || response.ok) return response;
       lastError = new Error(`Server responded with ${response.status}`);
     } catch (error) {
@@ -55,8 +61,9 @@ async function scrapeTorrentSites(query: string, type: string): Promise<string> 
       const response = await fetchWithRetry(url, {
         headers: {
           'User-Agent': USER_AGENT,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept': ACCEPT,
           'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://www.google.com', // Mimic browser
         },
       });
       console.log(`${site.name} Status: ${response.status}`);
@@ -109,6 +116,8 @@ serve(async (req: Request): Promise<Response> => {
         'trakt-api-version': '2',
         'Content-Type': 'application/json',
         'User-Agent': USER_AGENT,
+        'Accept': ACCEPT,
+        'Referer': 'https://www.google.com',
       },
     });
     console.log(`Trakt status: ${traktResponse.status}`);
