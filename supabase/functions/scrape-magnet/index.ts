@@ -1,5 +1,5 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-import { DOMParser } from 'https://deno.land/x/deno_dom@v0.1.36/deno-dom-wasm.ts';
+import { DOMParser } from 'https://deno.land/x/deno_dom@v0.1.47-alpha/deno-dom-wasm.ts';
 
 const TRAKT_API_KEY = Deno.env.get('TRAKT_API_KEY');
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
@@ -189,7 +189,7 @@ serve(async (req: Request): Promise<Response> => {
     console.log('Search query:', query);
 
     const magnet = await scrapeTorrentSites(query, type);
-    return new Response(JSON.stringify({ magnet, title: traktData.title, year: traktdata.year }), {
+    return new Response(JSON.stringify({ magnet, title: traktData.title, year: traktData.year }), {
       status: 200,
       headers,
     });
