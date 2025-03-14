@@ -6,9 +6,17 @@ async function fetchWithTimeout(url: string, timeoutMs: number = 10000): Promise
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html',
+      },
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
+    const text = await response.text();
+    console.log(`Fetched ${url} - First 200 chars: ${text.slice(0, 200)}`);
+    return text;
   } catch (error) {
     throw new Error(`Fetch failed for ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   } finally {
@@ -39,48 +47,9 @@ async function scrapeTorrentSites(query: string): Promise<string> {
         return null;
       },
     },
-    {
-      siteName: 'LimeTorrents',
-      getSearchUrl: (q: string) => `https://www.limetorrents.lol/search/all/${encodeURIComponent(q)}/seeds/1/`,
-      parseHtml: async (html: string) => {
-        console.log('Parsing LimeTorrents HTML');
-        const rows = html.split('<tr>').slice(1);
-        for (const row of rows) {
-          const seedMatch = row.match(/<td class="tdseed">(\d+)<\/td>/i);
-          const linkMatch = row.match(/href="\/[^"]+-torrent-\d+\.html"/i);
-          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
-          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
-          console.log(`LimeTorrents - Seeds: ${seeds}, Link: ${link || 'none'}`);
-          if (seeds > 0 && link) {
-            const torrentPage = await fetchWithTimeout(`https://www.limetorrents.lol${link}`);
-            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
-            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
-          }
-        }
-        return null;
-      },
-    },
-    {
-      siteName: 'YTS',
-      getSearchUrl: (q: string) => `https://yts.mx/browse-movies/${encodeURIComponent(q)}/all/all/0/seeds`,
-      parseHtml: async (html: string) => {
-        console.log('Parsing YTS HTML');
-        const rows = html.split('<div class="browse-movie-wrap">').slice(1);
-        for (const row of rows) {
-          const seedMatch = row.match(/<span class="badge seeds">(\d+)<\/span>/i);
-          const linkMatch = row.match(/href="https:\/\/yts\.mx\/movies\/[^"]+"/i);
-          const seeds = seedMatch ? Number(seedMatch[1]) : 0;
-          const link = linkMatch ? linkMatch[0].replace('href="', '').replace('"', '') : null;
-          console.log(`YTS - Seeds: ${seeds}, Link: ${link || 'none'}`);
-          if (seeds > 0 && link) {
-            const torrentPage = await fetchWithTimeout(link);
-            const magnetMatch = torrentPage.match(/href="magnet:[^"]+"/i);
-            return magnetMatch ? magnetMatch[0].replace('href="', '').replace('"', '') : null;
-          }
-        }
-        return null;
-      },
-    },
+    // Comment out others for now to isolate
+    // { siteName: 'LimeTorrents', ... },
+    // { siteName: 'YTS', ... },
   ];
 
   for (const site of torrentSites) {
