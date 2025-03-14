@@ -6,12 +6,17 @@ async function scrapeTorrentSites(query: string): Promise<string> {
   const sites = [
     {
       name: 'YTS',
-      searchUrl: (q: string) => `https://yts.mx/movies/${encodeURIComponent(q.split(' ').join('-').toLowerCase())}`,
+      searchUrl: (q: string) => {
+        const url = `https://yts.mx/movies/${encodeURIComponent(q.split(' ').join('-').toLowerCase())}`;
+        console.log('YTS URL:', url);
+        return url;
+      },
       parse: async (html: string) => {
-        console.log('Parsing YTS, HTML snippet:', html.slice(0, 500));
+        console.log('Parsing YTS, HTML snippet:', html.slice(0, 1000));
         const magnetMatches = [...html.matchAll(/href="(magnet:[^"]+)"/gi)];
+        console.log('Magnet matches found:', magnetMatches.length);
         if (magnetMatches.length > 0) {
-          const magnet = magnetMatches[0][1]; // First match
+          const magnet = magnetMatches[0][1];
           console.log('Magnet found:', magnet);
           return magnet;
         }
@@ -31,9 +36,10 @@ async function scrapeTorrentSites(query: string): Promise<string> {
       },
     });
     console.log(`Status: ${response.status}`);
+    console.log(`Response URL: ${response.url}`);
     if (!response.ok) {
       console.log(`Skipping ${site.name} due to ${response.status}`);
-      continue; // Skip to next site instead of throwing
+      continue;
     }
     const searchHtml = await response.text();
     console.log(`${site.name} HTML length: ${searchHtml.length}`);
@@ -58,10 +64,15 @@ serve(async (req: Request): Promise<Response> => {
     if (!TRAKT_API_KEY) throw new Error('TRAKT_API_KEY not set');
     const traktResponse = await fetch(`https://api.trakt.tv/${type}s/${traktId}?extended=full`, {
       headers: { 'trakt-api-key': TRAKT_API_KEY },
-    }).then(r => r.text());
-    console.log('Trakt response snippet:', traktResponse.slice(0, 200));
-    const traktData = JSON.parse(traktResponse);
-    const query = `${traktData.title} ${traktData.year}`;
+    });
+    console.log(`Trakt status: ${traktResponse.status}`);
+    if (!traktResponse.ok) {
+      throw new Error(`Trakt API failed with status: ${traktResponse.status}`);
+    }
+    const traktText = await traktResponse.text();
+    console.log('Trakt response snippet:', traktText.slice(0, 200));
+    const traktData = JSON.parse(traktText);
+    const query = traktData.year ? `${traktData.title} ${traktData.year}` : traktData.title;
     console.log('Query:', query);
 
     const magnet = await scrapeTorrentSites(query);
