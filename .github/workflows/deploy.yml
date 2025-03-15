@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "functions/premiumize-proxy/**"
+      - "functions/premiumize-proxy"
 
 jobs:
   deploy:
