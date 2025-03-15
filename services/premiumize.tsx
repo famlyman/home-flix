@@ -221,7 +221,7 @@ export async function getMediaUrl(
       );
     }
 
-    // Get direct link from Premiumize
+    
     const directLink = await fetchPremiumizeLink(token, primaryQuery, fallbackQueries);
 
     // Pass to Supabase proxy
