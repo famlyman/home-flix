@@ -2,25 +2,39 @@ name: Deploy Supabase Function
 
 on:
   push:
-    branches: [main] # Adjust if needed
-    paths:
-      - "supabase/functions/**" # Catches any change in the directory
+    branches: [main]
+    paths: ["supabase/functions/premiumize-proxy.tsx"]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with: { node-version: "18" }
-      - run: |
-          curl -L https://github.com/supabase/cli/releases/download/v1.136.3/supabase_1.136.3_linux_amd64.tar.gz -o supabase.tar.gz
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js (for environment compatibility)
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Download and Install Supabase CLI
+        run: |
+          curl -L --retry 3 --retry-delay 5 -A "GitHub-Actions" https://github.com/supabase/cli/releases/download/v1.136.3/supabase_1.136.3_linux_amd64.tar.gz -o supabase.tar.gz
+          # Check file size (should be ~20MB, not 9 bytes)
+          [ $(stat -c %s supabase.tar.gz) -gt 1000000 ] || { echo "Download failed: File too small"; exit 1; }
           tar -xzf supabase.tar.gz
           chmod +x supabase
           sudo mv supabase /usr/local/bin/
           supabase --version
-      - env:
+
+      - name: Deploy Premiumize Proxy Function
+        env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ajkjsezdaulybvrscoyv
-        run: supabase functions deploy premiumize-proxy --project-ref $SUPABASE_PROJECT_REF
+        run: |
+          supabase functions deploy premiumize-proxy --project-ref $SUPABASE_PROJECT_REF
         working-directory: ./supabase/functions
+
+      - name: Verify Deployment
+        run: |
+          curl -X GET "https://ajkjsezdaulybvrscoyv.supabase.co/functions/v1/premiumize-proxy" -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
