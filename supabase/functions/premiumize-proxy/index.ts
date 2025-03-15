@@ -1,10 +1,25 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
-// Trigger again
-const PREMIUMIZE_API_URL = 'https://www.premiumize.me/api';
+
+const USER_AGENT = 'HomeFlixApp'; // Consistent with your client-side UA
 
 serve(async (req: Request): Promise<Response> => {
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*', // Allow CORS for your React Native app
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  });
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers });
+  }
+
   if (req.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 });
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers,
+    });
   }
 
   try {
@@ -12,37 +27,41 @@ serve(async (req: Request): Promise<Response> => {
     const { sourceUrl, access_token } = body as { sourceUrl?: string; access_token?: string };
 
     if (!sourceUrl || !access_token) {
-      return new Response(JSON.stringify({ error: 'Source URL and access token required' }), {
+      return new Response(JSON.stringify({ error: 'Source URL and access token are required' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
       });
     }
 
-    const formData = new URLSearchParams();
-    formData.append('src', sourceUrl);
-    formData.append('access_token', access_token);
-
-    const response = await fetch(`${PREMIUMIZE_API_URL}/transfer/directdl`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
+    // Verify the direct link is accessible
+    const response = await fetch(sourceUrl, {
+      method: 'HEAD', // Use HEAD to avoid downloading the file
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'User-Agent': USER_AGENT,
+      },
     });
 
-    const data = await response.json() as { status: string; content?: { link: string }[]; message?: string };
-
-    if (data.status === 'success' && data.content && data.content.length > 0) {
-      return new Response(JSON.stringify({ streamUrl: data.content[0].link }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
+    if (!response.ok) {
+      console.error(`Invalid Premiumize link: HTTP ${response.status}`);
+      return new Response(JSON.stringify({ error: `Invalid Premiumize link: HTTP ${response.status}` }), {
+        status: 400,
+        headers,
       });
     }
 
-    throw new Error(data.message || 'No streamable link available');
+    // Return the direct link as the stream URL
+    console.log(`Valid stream URL: ${sourceUrl}`);
+    return new Response(JSON.stringify({ streamUrl: sourceUrl }), {
+      status: 200,
+      headers,
+    });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('Proxy error:', errorMessage);
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
     });
   }
 });

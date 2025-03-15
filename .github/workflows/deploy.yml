@@ -1,26 +1,35 @@
-name: Deploy Supabase Functions
+name: Deploy Supabase Function
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - 'supabase/functions/**'
-  workflow_dispatch:
+      - "functions/premiumize-proxy/**"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js (for Supabase CLI)
+        uses: actions/setup-node@v3
         with:
-          version: latest
-      - name: Deploy Functions
+          node-version: "18"
+
+      - name: Install Supabase CLI
+        run: npm install -g supabase
+
+      - name: Deploy Premiumize Proxy Function
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ajkjsezdaulybvrscoyv
+          SUPABASE_PROJECT_REF: ajkjsezdaulybvrscoyv
         run: |
-          supabase login --token "$SUPABASE_ACCESS_TOKEN"
-          supabase functions deploy premiumize-proxy --project-ref "$SUPABASE_PROJECT_ID"
-          supabase functions deploy scrape-magnet --project-ref "$SUPABASE_PROJECT_ID"
+          supabase functions deploy premiumize-proxy --project-ref $SUPABASE_PROJECT_REF
+        working-directory: ./functions
+
+      - name: Verify Deployment
+        run: |
+          curl -X GET "https://ajkjsezdaulybvrscoyv.supabase.co/functions/v1/premiumize-proxy" -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"

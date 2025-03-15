@@ -1,175 +1,113 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
+import qs from 'https://deno.land/x/qs@6.9.0/mod.ts';
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const ACCEPT = 'text/html,application/xhtml+xml,application/json;q=0.9,image/webp,*/*;q=0.8';
+const PREMIUMIZE_BASE_URL = 'https://www.premiumize.me/api';
 
-interface TorrentSite {
-  name: string;
-  searchUrl: (query: string) => string;
-  parse: (html: string, query: string) => Promise<string | null>;
-}
+const CONFIG = {
+  MAX_RETRIES: 3,
+  DEFAULT_TIMEOUT: 30000,
+  SUPPORTED_TYPES: ['movie', 'show'] as const,
+};
 
-async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
-  let lastError;
+/**
+ * Perform HTTP requests with automatic retries
+ */
+async function fetchWithRetry(url: string, options: RequestInit, retries = CONFIG.MAX_RETRIES): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CONFIG.DEFAULT_TIMEOUT);
+  options.signal = controller.signal;
+
+  let lastError: Error | undefined;
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, options);
-      if (response.status === 403 || response.status === 429) {
-        console.log(`Retrying due to ${response.status} at attempt ${i + 1}`);
-        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      clearTimeout(timeoutId);
+      
+      if (response.status === 429 || response.status === 403) {
+        const backoffTime = Math.pow(2, i) * 1000;
+        console.log(`Retrying due to ${response.status} at attempt ${i + 1}, waiting ${backoffTime}ms`);
+        await new Promise(r => setTimeout(r, backoffTime));
         continue;
       }
-      if (response.status < 500 || response.ok) return response;
-      lastError = new Error(`Server responded with ${response.status}`);
-    } catch (error) {
-      lastError = error;
-      await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
-    }
-  }
-  throw lastError;
-}
-
-async function scrapeTorrentSites(query: string, type: string): Promise<string> {
-  console.log(`Searching for: "${query}" (${type})`);
-
-  const sites: TorrentSite[] = [
-    {
-      name: 'YTS',
-      searchUrl: (q: string) => {
-        const slug = q.split(' ').join('-').toLowerCase();
-        return `https://yts.mx/movies/${encodeURIComponent(slug)}`;
-      },
-      parse: async (html: string) => {
-        console.log('YTS HTML snippet:', html.slice(0, 1000));
-        const magnetMatches = [...html.matchAll(/href="(magnet:[^"]+)"/gi)];
-        console.log(`Found ${magnetMatches.length} magnet links on YTS`);
-        if (magnetMatches.length > 0) {
-          const hdMatch = magnetMatches.find(m => m[1].includes('1080p'));
-          return hdMatch ? hdMatch[1] : magnetMatches[0][1];
-        }
-        return null;
-      },
-    },
-    {
-      name: '1337x',
-      searchUrl: (q: string) => `https://1337x.to/search/${encodeURIComponent(q)}/1/`,
-      parse: async (html: string) => {
-        console.log('1337x HTML snippet:', html.slice(0, 1000));
-        const torrentMatches = [...html.matchAll(/<a href="\/torrent\/[^"]+">([^<]+)<\/a>/gi)];
-        console.log(`Found ${torrentMatches.length} torrents on 1337x`);
-        if (torrentMatches.length === 0) return null;
-
-        const seedsMatches = [...html.matchAll(/<td class="coll-2 seeds">(\d+)<\/td>/gi)];
-        let bestTorrentUrl = '';
-        let maxSeeds = 0;
-
-        for (let i = 0; i < torrentMatches.length; i++) {
-          const torrentUrl = `https://1337x.to${torrentMatches[i][0].match(/href="([^"]+)"/)[1]}`;
-          const seeds = parseInt(seedsMatches[i]?.[1] || '0');
-          if (seeds > maxSeeds) {
-            maxSeeds = seeds;
-            bestTorrentUrl = torrentUrl;
-          }
-        }
-
-        if (!bestTorrentUrl) return null;
-
-        console.log(`Following 1337x torrent: ${bestTorrentUrl}`);
-        const torrentResponse = await fetchWithRetry(bestTorrentUrl, {
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Accept': ACCEPT,
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Referer': 'https://1337x.to',
-          },
-        });
-        if (!torrentResponse.ok) return null;
-
-        const torrentHtml = await torrentResponse.text();
-        const magnetMatch = torrentHtml.match(/href="(magnet:[^"]+)"/i);
-        console.log(`Magnet found on 1337x: ${magnetMatch ? 'Yes' : 'No'}`);
-        return magnetMatch ? magnetMatch[1] : null;
-      },
-    },
-    {
-      name: 'PirateBay',
-      searchUrl: (q: string) => `https://pirateproxy.live/search/${encodeURIComponent(q)}/1/99/0`,
-      parse: async (html: string) => {
-        console.log('PirateBay HTML snippet:', html.slice(0, 1000));
-        const torrentMatches = [...html.matchAll(/<a href="\/torrent\/[^"]+" title="[^"]+">([^<]+)<\/a>/gi)];
-        console.log(`Found ${torrentMatches.length} torrents on PirateBay`);
-        if (torrentMatches.length === 0) return null;
-
-        const seedsMatches = [...html.matchAll(/<td align="right">(\d+)<\/td>/gi)];
-        let bestTorrentUrl = '';
-        let maxSeeds = 0;
-
-        for (let i = 0; i < torrentMatches.length; i++) {
-          const torrentUrlMatch = html.matchAll(/<a href="(\/torrent\/[^"]+)" title="[^"]+">/gi);
-          const urls = Array.from(torrentMatches);
-          const torrentUrl = `https://pirateproxy.live${urls[i][0].match(/href="([^"]+)"/)[1]}`;
-          const seeds = parseInt(seedsMatches[i]?.[1] || '0');
-          if (seeds > maxSeeds) {
-            maxSeeds = seeds;
-            bestTorrentUrl = torrentUrl;
-          }
-        }
-
-        if (!bestTorrentUrl) return null;
-
-        console.log(`Following PirateBay torrent: ${bestTorrentUrl}`);
-        const torrentResponse = await fetchWithRetry(bestTorrentUrl, {
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Accept': ACCEPT,
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Referer': 'https://pirateproxy.live',
-          },
-        });
-        if (!torrentResponse.ok) return null;
-
-        const torrentHtml = await torrentResponse.text();
-        const magnetMatch = torrentHtml.match(/href="(magnet:[^"]+)"/i);
-        console.log(`Magnet found on PirateBay: ${magnetMatch ? 'Yes' : 'No'}`);
-        return magnetMatch ? magnetMatch[1] : null;
-      },
-    },
-  ];
-
-  for (const site of sites) {
-    console.log(`Trying ${site.name}`);
-    try {
-      const url = site.searchUrl(query);
-      console.log(`${site.name} URL: ${url}`);
-      const response = await fetchWithRetry(url, {
-        headers: {
-          'User-Agent': USER_AGENT,
-          'Accept': ACCEPT,
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': 'https://www.google.com',
-        },
-      });
-      console.log(`${site.name} Status: ${response.status}`);
+      
       if (!response.ok) {
-        console.log(`Skipping ${site.name} due to ${response.status}`);
-        continue;
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       }
-      const html = await response.text();
-      console.log(`${site.name} HTML length: ${html.length}`);
-      const magnet = await site.parse(html, query);
-      if (magnet) {
-        console.log(`Found magnet link from ${site.name}`);
-        return magnet;
-      }
+      
+      return response;
     } catch (error) {
-      console.error(`Error with ${site.name}:`, error);
+      clearTimeout(timeoutId);
+      lastError = error as Error;
+      const backoffTime = Math.pow(2, i) * 1000;
+      console.log(`Retry attempt ${i + 1}/${retries} after ${backoffTime}ms:`, error);
+      await new Promise(r => setTimeout(r, backoffTime));
     }
   }
-  throw new Error('No seeded torrents found');
+  throw lastError || new Error('Unknown error during fetch');
 }
 
+/**
+ * Get direct download link from Premiumize
+ */
+async function getPremiumizeLink(query: string, type: string, token: string): Promise<string> {
+  console.log(`Fetching Premiumize link for: "${query}" (${type})`);
+  
+  try {
+    // First, search Premiumize cache
+    const searchResponse = await fetchWithRetry(`${PREMIUMIZE_BASE_URL}/cache/check`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': ACCEPT,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: qs.stringify({
+        access_token: token,
+        items: [query],
+      }),
+    });
+
+    const searchData = await searchResponse.json();
+    console.log('Cache check response:', searchData);
+    
+    if (searchData.status !== 'success' || !searchData.response?.[0]) {
+      throw new Error('Not found in Premiumize cache');
+    }
+
+    // Then get the direct download link
+    const dlResponse = await fetchWithRetry(`${PREMIUMIZE_BASE_URL}/transfer/directdl`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': ACCEPT,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: qs.stringify({
+        access_token: token,
+        src: query,
+      }),
+    });
+
+    const dlData = await dlResponse.json();
+    console.log('Direct DL response:', dlData);
+
+    if (dlData.status !== 'success' || !dlData.location) {
+      throw new Error('Failed to get direct download link');
+    }
+
+    return dlData.location;
+  } catch (error) {
+    console.error('Premiumize error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Server handler
+ */
 serve(async (req: Request): Promise<Response> => {
-  console.log('Function started');
   const headers = new Headers({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -177,32 +115,55 @@ serve(async (req: Request): Promise<Response> => {
     'Content-Type': 'application/json',
   });
 
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers });
+  }
+
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405, headers });
+    return new Response(JSON.stringify({ 
+      status: 'error',
+      message: 'Method not allowed' 
+    }), { status: 405, headers });
   }
 
   try {
     const body = await req.json();
-    console.log('Request body:', JSON.stringify(body));
-    const { title, year, type } = body;
+    const { title, year, type, token } = body;
 
-    if (!title || !type) throw new Error('Missing required parameters: title and type');
-    if (!['movie', 'show'].includes(type)) throw new Error('Type must be "movie" or "show"');
+    // Validation
+    if (!title || !type || !token) {
+      return new Response(JSON.stringify({ 
+        status: 'error',
+        message: 'Missing required parameters: title, type, and token' 
+      }), { status: 400, headers });
+    }
 
+    if (!CONFIG.SUPPORTED_TYPES.includes(type)) {
+      return new Response(JSON.stringify({ 
+        status: 'error',
+        message: 'Type must be "movie" or "show"' 
+      }), { status: 400, headers });
+    }
+
+    // Construct query with TMDB/Trakt-style formatting
     const query = year ? `${title} ${year}` : title;
-    console.log('Search query:', query);
+    console.log('Processing Premiumize query:', query);
 
-    const magnet = await scrapeTorrentSites(query, type);
-    return new Response(JSON.stringify({ magnet, title, year }), {
-      status: 200,
-      headers,
-    });
+    const directLink = await getPremiumizeLink(query, type, token);
+
+    return new Response(JSON.stringify({ 
+      status: 'success',
+      link: directLink,
+      title,
+      year,
+      type
+    }), { status: 200, headers });
   } catch (error) {
-    console.error('Error:', error instanceof Error ? error.message : 'Unknown');
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to scrape' }), {
-      status: 500,
-      headers,
-    });
+    console.error('Request error:', error);
+    return new Response(JSON.stringify({ 
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Failed to fetch content',
+      code: 'PREMIUMIZE_ERROR'
+    }), { status: 500, headers });
   }
 });

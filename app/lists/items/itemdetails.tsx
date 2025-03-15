@@ -41,7 +41,7 @@ interface Episode {
 }
 
 export default function ItemDetailsScreen() {
-  const { id, type, title, listId } = useLocalSearchParams<{
+  const { id, type, title: paramTitle, listId } = useLocalSearchParams<{
     id: string;
     type: "movie" | "show";
     title: string;
@@ -138,20 +138,46 @@ export default function ItemDetailsScreen() {
       }
       let url: string;
       if (type === "movie" && itemDetails) {
-        url = await getMediaUrl(numericId, "movie"); // No sourceUrl, force scrape
-      } else if (type === "show" && selectedEpisode) {
-        url = await getMediaUrl(numericId, "show", { season: selectedSeason!, episode: selectedEpisode.episode_number });
+        url = await getMediaUrl(numericId, "movie", undefined, itemDetails.title, parseInt(itemDetails.year));
+      } else if (type === "show" && selectedEpisode && itemDetails) {
+        url = await getMediaUrl(
+          numericId,
+          "show",
+          { season: selectedSeason!, episode: selectedEpisode.episode_number },
+          itemDetails.title,
+          parseInt(itemDetails.year)
+        );
       } else {
         throw new Error("No playable content selected");
       }
-      router.push({ pathname: "/video", params: { mediaUrl: url, title: selectedEpisode ? selectedEpisode.name : itemDetails!.title, id, type, season: selectedSeason?.toString(), episode: selectedEpisode?.episode_number.toString() } });
+      router.push({
+        pathname: "/video",
+        params: {
+          mediaUrl: url,
+          title: selectedEpisode ? selectedEpisode.name : itemDetails!.title,
+          id,
+          type,
+          season: selectedSeason?.toString(),
+          episode: selectedEpisode?.episode_number.toString(),
+        },
+      });
     } catch (err: any) {
       console.error("⭐⭐ Play error:", err.message);
-      setError(err.message || "Failed to fetch media URL");
-      if (err.message.includes("authenticated")) {
+      let errorMessage = "Failed to load stream";
+      if (err.message.includes("cache")) {
+        errorMessage = "This content isn’t available in Premiumize yet. Try again later.";
+      } else if (err.message.includes("authenticated")) {
+        errorMessage = "Please log in to Premiumize";
         await logout();
         setShowAuth(true);
+      } else if (err.message.includes("proxy")) {
+        errorMessage = "Streaming service unavailable. Please try again.";
+      } else if (err.message.includes("TMDB")) {
+        errorMessage = "Couldn’t find media details. Check your connection.";
+      } else if (err.message.includes("direct link")) {
+        errorMessage = "Unable to generate streaming link. Try again later.";
       }
+      setError(errorMessage);
     } finally {
       setIsFetching(false);
     }
@@ -170,7 +196,7 @@ export default function ItemDetailsScreen() {
           <Image source={{ uri: itemDetails.posterUrl }} style={styles.posterImage} />
         )}
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.title}>{paramTitle}</Text>
           {itemDetails?.year && <Text style={styles.subtitle}>({itemDetails.year})</Text>}
           <View style={styles.buttonContainer}>
             {listId && (
@@ -284,7 +310,7 @@ export default function ItemDetailsScreen() {
       {showAuth && <PremiumizeAuthNew onAuthComplete={handleAuthComplete} />}
     </View>
   );
-  if (!itemDetails) return <Text style={styles.errorText}>No details available for {title}</Text>;
+  if (!itemDetails) return <Text style={styles.errorText}>No details available for {paramTitle}</Text>;
 
   return (
     <View style={[styles.container, { paddingTop: statusBarHeight }]}>
