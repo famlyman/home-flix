@@ -23,7 +23,7 @@ jobs:
           tar -xzf supabase.tar.gz
           chmod +x supabase
           sudo mv supabase /usr/local/bin/
-          supabase --version  # Verify it works
+          supabase --version
 
       - name: Deploy Premiumize Proxy Function
         env:
