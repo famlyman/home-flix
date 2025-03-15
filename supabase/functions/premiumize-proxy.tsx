@@ -16,3 +16,4 @@ jobs:
           SUPABASE_PROJECT_REF: ajkjsezdaulybvrscoyv
         run: supabase functions deploy premiumize-proxy --project-ref $SUPABASE_PROJECT_REF
         working-directory: ./supabase/functions
+        // forcing
