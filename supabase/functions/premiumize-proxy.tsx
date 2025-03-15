@@ -1,16 +1,15 @@
 import { serve } from 'https://deno.land/std@0.131.0/http/server.ts';
 
-const USER_AGENT = 'HomeFlixApp'; // Consistent with your client-side UA
+const USER_AGENT = 'HomeFlixApp';
 
 serve(async (req: Request): Promise<Response> => {
   const headers = new Headers({
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*', // Allow CORS for your React Native app
+    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   });
 
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers });
   }
@@ -33,9 +32,8 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // Verify the direct link is accessible
     const response = await fetch(sourceUrl, {
-      method: 'HEAD', // Use HEAD to avoid downloading the file
+      method: 'HEAD',
       headers: {
         'Authorization': `Bearer ${access_token}`,
         'User-Agent': USER_AGENT,
@@ -50,7 +48,6 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // Return the direct link as the stream URL
     console.log(`Valid stream URL: ${sourceUrl}`);
     return new Response(JSON.stringify({ streamUrl: sourceUrl }), {
       status: 200,

@@ -170,12 +170,12 @@ export async function getMediaUrl(
 ): Promise<string> {
   const token = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
   if (!token) throw new Error("Not authenticated - please log in");
+  console.log("Premiumize access token:", token); // Log token here
 
   try {
-    let queryTitle: string = title || "Unknown"; // Default to "Unknown" if title is undefined
-    let queryYear: number | undefined = year;
+    let queryTitle: string;
+    let queryYear: number;
 
-    // Fetch from TMDB if title or year is missing
     if (!title || !year) {
       const response = await fetch(
         `https://api.themoviedb.org/3/${type === "movie" ? "movie" : "tv"}/${traktId}?api_key=${TMDB_API_KEY}`
@@ -183,23 +183,23 @@ export async function getMediaUrl(
       const data = await response.json();
       if (!data) throw new Error("Failed to fetch media details from TMDB");
 
-      // Ensure queryTitle is a string, fallback to "Unknown"
-      queryTitle = (data.title || data.name || "Unknown") as string;
-      queryYear = parseInt(data.release_date?.split("-")[0] || data.first_air_date?.split("-")[0] || "0", 10);
+      queryTitle = data.title || data.name || "";
+      if (!queryTitle) throw new Error("No title found in TMDB data");
 
-      // Fail fast if year is invalid (0 is not a valid year)
-      if (!queryYear || queryYear === 0) {
-        throw new Error("Invalid year from TMDB data");
-      }
+      const yearStr = data.release_date?.split("-")[0] || data.first_air_date?.split("-")[0];
+      queryYear = parseInt(yearStr, 10);
+      if (!queryYear || isNaN(queryYear)) throw new Error("Invalid year from TMDB data");
+    } else {
+      queryTitle = title;
+      queryYear = year;
     }
 
-    // Construct queries with more specific formats
     const baseQuery = `${queryTitle} ${queryYear}`;
     let primaryQuery = baseQuery;
     const fallbackQueries: string[] = [
-      queryTitle, // Title only
-      `${queryTitle}.${queryYear}`, // Dot notation
-      `${queryTitle.replace(/\s+/g, ".")}.${queryYear}`, // Replace spaces with dots
+      queryTitle,
+      `${queryTitle}.${queryYear}`,
+      `${queryTitle.replace(/\s+/g, ".")}.${queryYear}`,
     ];
 
     if (type === "show" && episode) {
@@ -207,25 +207,23 @@ export async function getMediaUrl(
       const seasonEp = `S${season.toString().padStart(2, "0")}E${ep.toString().padStart(2, "0")}`;
       primaryQuery = `${queryTitle} ${seasonEp}`;
       fallbackQueries.unshift(
-        `${baseQuery} ${seasonEp}`, // "Title Year SXXEXX"
-        `${queryTitle}.${seasonEp}`, // "Title.SXXEXX"
-        `${queryTitle.replace(/\s+/g, ".")}.${seasonEp}`, // "Title.With.Dots.SXXEXX"
-        `${queryTitle} ${seasonEp} 1080p`, // Add quality tag
-        `${queryTitle} ${seasonEp} WEB-DL` // Add source tag
+        `${baseQuery} ${seasonEp}`,
+        `${queryTitle}.${seasonEp}`,
+        `${queryTitle.replace(/\s+/g, ".")}.${seasonEp}`,
+        `${queryTitle} ${seasonEp} 1080p`,
+        `${queryTitle} ${seasonEp} WEB-DL`
       );
     } else if (type === "movie") {
       fallbackQueries.push(
-        `${baseQuery} 1080p`, // Add quality tag
-        `${baseQuery} WEB-DL`, // Add source tag
-        `${queryTitle.replace(/\s+/g, ".")}.${queryYear}.1080p` // Full dotted with quality
+        `${baseQuery} 1080p`,
+        `${baseQuery} WEB-DL`,
+        `${queryTitle.replace(/\s+/g, ".")}.${queryYear}.1080p`
       );
     }
 
-    
     const directLink = await fetchPremiumizeLink(token, primaryQuery, fallbackQueries);
+    console.log("Direct link from Premiumize:", directLink); // Log direct link here
 
-    // Pass to Supabase proxy
-    console.log("Sending to proxy:", directLink);
     const proxyResponse = await axios.post(
       SUPABASE_PROXY_URL,
       { sourceUrl: directLink, access_token: token },
