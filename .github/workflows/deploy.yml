@@ -2,10 +2,8 @@ name: Deploy Supabase Function
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - "supabase/functions/premiumize-proxy.tsx"
+    branches: [main]
+    paths: ["supabase/functions/premiumize-proxy.tsx"]
 
 jobs:
   deploy:
@@ -14,13 +12,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Node.js
+      - name: Setup Node.js (for environment compatibility)
         uses: actions/setup-node@v3
         with:
           node-version: "18"
 
-      - name: Install Supabase CLI
-        run: npm install -g supabase@1.136.3 # Pin to a version before npm deprecation
+      - name: Download and Install Supabase CLI
+        run: |
+          curl -L https://github.com/supabase/cli/releases/download/v1.136.3/supabase_1.136.3_linux_amd64.tar.gz -o supabase.tar.gz
+          tar -xzf supabase.tar.gz
+          chmod +x supabase
+          sudo mv supabase /usr/local/bin/
+          supabase --version  # Verify it works
 
       - name: Deploy Premiumize Proxy Function
         env:
