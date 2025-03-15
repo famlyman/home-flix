@@ -164,8 +164,8 @@ export default function ItemDetailsScreen() {
     } catch (err: any) {
       console.error("⭐⭐ Play error:", err.message);
       let errorMessage = "Failed to load stream";
-      if (err.message.includes("cache")) {
-        errorMessage = "This content isn’t available in Premiumize yet. Try again later.";
+      if (err.message.includes("not found in Premiumize cache")) {
+        errorMessage = "This content isn’t available in Premiumize yet. It may be added soon.";
       } else if (err.message.includes("authenticated")) {
         errorMessage = "Please log in to Premiumize";
         await logout();
