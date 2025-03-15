@@ -19,13 +19,13 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Download Supabase CLI
+      - name: Download and Install Supabase CLI
         run: |
-          curl -L https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz -o supabase.tar.gz
-          tar -xzf supabase.tar.gz
-          chmod +x supabase
-          sudo mv supabase /usr/local/bin/supabase
-          supabase --version  # Verify installation
+          curl -L https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz -o supabase.tar.gz || { echo "Download failed"; exit 1; }
+          tar -xzf supabase.tar.gz || { echo "Extraction failed"; exit 1; }
+          chmod +x supabase || { echo "chmod failed"; exit 1; }
+          sudo mv supabase /usr/local/bin/supabase || { echo "Move failed"; exit 1; }
+          supabase --version || { echo "CLI not working"; exit 1; }
 
       - name: Deploy Premiumize Proxy Function
         env:
